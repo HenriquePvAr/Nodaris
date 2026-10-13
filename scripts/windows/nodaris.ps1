@@ -92,6 +92,38 @@ function Start-Nodaris {
   'Solicitada inicialização Nodaris. Consulte status para verificar saúde.'
 }
 
+function Request-NodarisStop([int]$TimeoutSeconds = 30) {
+  if (-not (Get-NodarisTask)) { return $false }
+  $state = Get-SupervisorState
+  if ($null -ne $state -and $state.status -in @('stopped', 'degraded', 'error')) {
+    $supervisorAlive = $state.supervisorPid -and (Get-Process -Id ([int]$state.supervisorPid) -ErrorAction SilentlyContinue)
+    if (-not $supervisorAlive) {
+      return (-not (Get-LocalPortState 3333) -and -not (Get-LocalPortState 3334) -and -not (Get-LocalPortState 8080))
+    }
+  }
+  if ($null -eq $state -and -not (Get-LocalPortState 3333) -and -not (Get-LocalPortState 3334) -and -not (Get-LocalPortState 8080)) {
+    return $true
+  }
+
+  New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
+  [IO.File]::WriteAllText($stopFile, [DateTime]::UtcNow.ToString('o'), [Text.UTF8Encoding]::new($false))
+  $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+  do {
+    Start-Sleep -Milliseconds 500
+    $state = Get-SupervisorState
+    if ($null -ne $state -and $state.status -in @('stopped', 'degraded', 'error')) {
+      $supervisorAlive = $state.supervisorPid -and (Get-Process -Id ([int]$state.supervisorPid) -ErrorAction SilentlyContinue)
+      if (-not $supervisorAlive) {
+        return (-not (Get-LocalPortState 3333) -and -not (Get-LocalPortState 3334) -and -not (Get-LocalPortState 8080))
+      }
+    }
+    if ($null -ne $state -and $state.supervisorPid -and -not (Get-Process -Id ([int]$state.supervisorPid) -ErrorAction SilentlyContinue)) {
+      return (-not (Get-LocalPortState 3333) -and -not (Get-LocalPortState 3334) -and -not (Get-LocalPortState 8080))
+    }
+  } while ([DateTime]::UtcNow -lt $deadline)
+  return $false
+}
+
 switch ($Command) {
   'install' {
     if (Get-NodarisTask) { throw "A tarefa '$taskName' já existe; não será substituída automaticamente." }
@@ -144,20 +176,11 @@ switch ($Command) {
   }
   'start' { Start-Nodaris }
   'stop' {
-    if (Get-NodarisTask) {
-      New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
-      [IO.File]::WriteAllText($stopFile, [DateTime]::UtcNow.ToString('o'), [Text.UTF8Encoding]::new($false))
-      $deadline = [DateTime]::UtcNow.AddSeconds(20)
-      do {
-        Start-Sleep -Milliseconds 500
-        $state = Get-SupervisorState
-      } while ([DateTime]::UtcNow -lt $deadline -and $null -ne $state -and $state.status -notin @('stopped', 'degraded', 'error'))
-    }
-    'Parada supervisionada solicitada. Serviços iniciados externamente não são encerrados; confira status.'
+    if (Request-NodarisStop) { 'Parada supervisionada confirmada. Serviços iniciados externamente não são encerrados.' }
+    else { throw 'Parada supervisionada não foi confirmada dentro do prazo; não inicie outro supervisor.' }
   }
   'restart' {
-    & $PSCommandPath stop
-    Start-Sleep -Seconds 2
+    if (-not (Request-NodarisStop)) { throw 'Parada supervisionada não foi confirmada; reinício cancelado para evitar duplicatas.' }
     Start-Nodaris
   }
   'status' { Show-Status }

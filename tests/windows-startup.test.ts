@@ -9,6 +9,7 @@ const launcherPath = new URL("../scripts/windows/launcher.vbs", import.meta.url)
 const managerPath = new URL("../scripts/windows/nodaris.ps1", import.meta.url);
 const supervisorPath = new URL("../scripts/windows/supervisor.ps1", import.meta.url);
 const diagnosticsPath = new URL("../scripts/windows/diagnostics.ps1", import.meta.url);
+const lifecyclePath = new URL("../scripts/windows/lifecycle.ps1", import.meta.url);
 
 describe("inicialização invisível do Windows", () => {
   it("usa WScript com janela oculta e sem credenciais em argumentos", async () => {
@@ -36,15 +37,33 @@ describe("inicialização invisível do Windows", () => {
     expect(repair).not.toMatch(/NODARIS_TOKEN|Bearer|runtime.?key|api.?key/i);
   });
 
+  it("aguarda parada confirmada antes de solicitar um reinício", async () => {
+    const manager = await readFile(managerPath, "utf8");
+    const restartStart = manager.indexOf("  'restart' {");
+    const restartEnd = manager.indexOf("  'enable' {", restartStart);
+    const restart = manager.slice(restartStart, restartEnd);
+
+    expect(manager).toContain("function Request-NodarisStop");
+    expect(manager).toContain("AddSeconds($TimeoutSeconds)");
+    expect(restart).toContain("if (-not (Request-NodarisStop))");
+    expect(restart).not.toContain("Start-Sleep");
+  });
+
   it("distingue health local do polling recente no plano de controle", async () => {
     const manager = await readFile(managerPath, "utf8");
     const supervisor = await readFile(supervisorPath, "utf8");
     const diagnostics = await readFile(diagnosticsPath, "utf8");
+    const lifecycle = await readFile(lifecyclePath, "utf8");
 
     expect(manager).toContain("Test-NodarisTunnelReadiness");
     expect(supervisor).toContain("Test-NodarisTunnelReadiness");
     expect(supervisor).toContain("health?details=true");
     expect(supervisor).toContain("startup-events.jsonl");
+    expect(supervisor).toContain("Invoke-NodarisRecoveryPolicy");
+    expect(supervisor).toContain("Stop-NodarisChildrenInOrder");
+    expect(supervisor).toContain("@('--import', 'tsx'");
+    expect(supervisor).not.toContain("$tsxCli");
+    expect(lifecycle).toContain("circuit_open");
     expect(manager).toContain("tunnel_chatgpt_readiness=");
     expect(supervisor).toContain("healthz");
     expect(diagnostics).toContain("[ValidateSet(");
@@ -82,7 +101,7 @@ describe("inicialização invisível do Windows", () => {
           ],
           { encoding: "utf8", timeout: 60_000 }
         );
-        expect(output).toContain("diagnostics-fixtures=PASS");
+        expect(output).toContain("lifecycle-diagnostics-fixtures=PASS");
       } finally {
         await rm(outputDirectory, { recursive: true, force: true });
       }

@@ -9,12 +9,13 @@ $stateRoot = Join-Path $localRoot 'supervisor'
 $stateFile = Join-Path $stateRoot 'state.json'
 $diagnosticsFile = Join-Path $stateRoot 'startup-events.jsonl'
 $diagnosticsScript = Join-Path $PSScriptRoot 'diagnostics.ps1'
+$lifecycleScript = Join-Path $PSScriptRoot 'lifecycle.ps1'
 $stopFile = Join-Path $stateRoot 'stop.request'
 $tokenFile = Join-Path $localRoot 'gateway-token.txt'
 $profileFile = Join-Path $localRoot 'tunnel-client\profiles\nodaris-local.yaml'
 $tunnelExe = Join-Path $localRoot 'tunnel-client\v0.0.15\tunnel-client.exe'
 $nodeExe = $null
-$tsxCli = Join-Path $repoRoot 'node_modules\tsx\dist\cli.mjs'
+$tsxModule = Join-Path $repoRoot 'node_modules\tsx'
 $approvedRoot = 'C:\Users\Dell\Downloads\Nodaris'
 $maxRestarts = 5
 $mutex = [Threading.Mutex]::new($false, 'LocalNodaris-M01-Supervisor')
@@ -30,6 +31,7 @@ $lastTunnelReadinessLogged = ''
 $startupPhase = 'configuration'
 $startupTimer = [Diagnostics.Stopwatch]::StartNew()
 . $diagnosticsScript
+. $lifecycleScript
 
 function Write-Diagnostic([string]$Component, [string]$Stage, [string]$Status, [string]$ReasonCode, [int]$Attempt = 0, [long]$DurationMs = 0, [int]$TimeoutSeconds = -1, [int]$BackoffSeconds = -1) {
   try {
@@ -159,13 +161,23 @@ function Start-Child([string]$Name, [string]$Executable, [string[]]$Arguments, [
 
 function Stop-Child([string]$Name) {
   if ($children.ContainsKey($Name) -and $null -ne $children[$Name]) {
-    try {
-      $process = Get-Process -Id $children[$Name].Id -ErrorAction SilentlyContinue
-      if ($null -ne $process) {
-        $taskkill = Join-Path $env:WINDIR 'System32\taskkill.exe'
-        Start-Process -FilePath $taskkill -ArgumentList @('/PID', [string]$process.Id, '/T', '/F') -WindowStyle Hidden -Wait
-      }
-    } catch { }
+    $process = $children[$Name]
+    $trackedPid = $process.Id
+    if (-not $process.HasExited) {
+      $taskkill = Join-Path $env:WINDIR 'System32\taskkill.exe'
+      $killer = Start-Process -FilePath $taskkill -ArgumentList @('/PID', [string]$trackedPid, '/T', '/F') -WindowStyle Hidden -Wait -PassThru
+      if ($killer.ExitCode -ne 0 -and -not $process.HasExited) { throw 'NODARIS_STOP_FAILED' }
+    }
+    $port = @{ agent = 3334; gateway = 3333; tunnel = 8080 }[$Name]
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+      $process.Refresh()
+      if ($process.HasExited -and -not (Test-Port $port)) { break }
+      Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+    $process.Refresh()
+    if (-not $process.HasExited) { throw 'NODARIS_STOP_TIMEOUT' }
+    if (Test-Port $port) { throw 'NODARIS_PORT_STILL_LISTENING' }
     $children[$Name] = $null
   }
   $statuses[$Name] = 'stopped'
@@ -181,10 +193,18 @@ function Wait-Until([scriptblock]$Condition, [int]$Seconds) {
   return $false
 }
 
+function Wait-NodarisBackoff([int]$Seconds) {
+  for ($elapsed = 0; $elapsed -lt $Seconds; $elapsed++) {
+    if (Test-Path -LiteralPath $stopFile) { return $false }
+    Start-Sleep -Seconds 1
+  }
+  return -not (Test-Path -LiteralPath $stopFile)
+}
+
 function Start-Stack {
   $startActions = @{
-    agent = { Start-Child 'agent' $nodeExe @($tsxCli, (Join-Path $repoRoot 'apps\agent\src\index.ts')) 3334 }
-    gateway = { Start-Child 'gateway' $nodeExe @($tsxCli, (Join-Path $repoRoot 'apps\gateway\src\index.ts')) 3333 }
+    agent = { Start-Child 'agent' $nodeExe @('--import', 'tsx', (Join-Path $repoRoot 'apps\agent\src\index.ts')) 3334 }
+    gateway = { Start-Child 'gateway' $nodeExe @('--import', 'tsx', (Join-Path $repoRoot 'apps\gateway\src\index.ts')) 3333 }
     tunnel = { Start-TunnelClient }
   }
   $healthChecks = @{
@@ -207,110 +227,96 @@ function Start-Stack {
   }
 
   foreach ($name in @('agent', 'gateway', 'tunnel')) {
-    $started = $false
-    for ($attempt = 0; $attempt -le $maxRestarts; $attempt++) {
-      $script:activeAttempt = $attempt + 1
-      $script:activeTimeout = $timeouts[$name]
-      $attemptTimer = [Diagnostics.Stopwatch]::StartNew()
-      Write-Diagnostic $name 'attempt' 'started' 'none' $activeAttempt 0 $activeTimeout
-      $failureReason = 'process_start_failed'
-      try {
-        & $startActions[$name]
-        $healthy = Wait-ServiceHealth $name $healthChecks[$name] $timeouts[$name]
-        if (-not $healthy) { $failureReason = $lastAgentHealthReason; throw 'NODARIS_HEALTH_TIMEOUT' }
-        $started = $true
+    $script:activeAttempt = 1
+    $script:activeTimeout = $timeouts[$name]
+    $startEventAction = {
+      param($Stage, $Status, $ReasonCode, $Attempt, $Delay)
+      $script:activeAttempt = [int]$Attempt
+      Write-Diagnostic $name $Stage $Status $ReasonCode $Attempt 0 $timeouts[$name] $Delay
+      if ($Stage -eq 'attempt' -and $Status -eq 'healthy') {
         $statuses[$name] = if ($name -eq 'tunnel') { 'healthy local; readiness ChatGPT monitorada' } else { 'healthy' }
-        $attemptTimer.Stop()
-        Write-Diagnostic $name 'attempt' 'healthy' 'health_passed' $activeAttempt $attemptTimer.ElapsedMilliseconds $activeTimeout
         Write-State 'running'
-        break
-      } catch {
-        if ($_.Exception.Message -eq 'NODARIS_PORT_IN_USE') { $failureReason = 'port_in_use' }
-        elseif ($_.Exception.Message -eq 'NODARIS_HEALTH_TIMEOUT') { $failureReason = $lastAgentHealthReason }
-        elseif ($_.Exception.Message -ne 'NODARIS_HEALTH_TIMEOUT') { $failureReason = 'process_start_failed' }
-        $attemptTimer.Stop()
-        Write-Diagnostic $name 'attempt' 'failed' $failureReason $activeAttempt $attemptTimer.ElapsedMilliseconds $activeTimeout
-        if ($null -ne $children[$name]) { Write-Diagnostic $name 'process' 'stopped' $failureReason $activeAttempt }
-        Stop-Child $name
-        if (Test-Path -LiteralPath $stopFile) {
-          $statuses[$name] = 'stopped_on_request'
-          $started = $true
-          Write-State 'stopping'
-          break
-        }
-        if ($attempt -ge $maxRestarts) {
-          $statuses[$name] = 'circuit_open; intervenção manual necessária'
-          $script:circuitOpen = $true
-          Write-Diagnostic $name 'attempt' 'failed' 'circuit_open' $activeAttempt $attemptTimer.ElapsedMilliseconds $activeTimeout
-          Write-State 'degraded'
-          throw
-        }
-        $restartCounts[$name]++
-        $delay = Get-NodarisBackoffSeconds $attempt
-        $statuses[$name] = "startup_backoff_${delay}s"
-        Write-Diagnostic $name 'backoff' 'scheduled' 'retry_scheduled' $activeAttempt 0 $activeTimeout $delay
+      } elseif ($Stage -eq 'backoff') {
+        $statuses[$name] = "startup_backoff_${Delay}s"
         Write-State 'recovering'
-        $backoffTimer = [Diagnostics.Stopwatch]::StartNew()
-        Start-Sleep -Seconds $delay
-        $backoffTimer.Stop()
-        Write-Diagnostic $name 'backoff' 'completed' 'retry_delay_elapsed' $activeAttempt $backoffTimer.ElapsedMilliseconds $activeTimeout $delay
+      } elseif ($ReasonCode -eq 'circuit_open') {
+        $statuses[$name] = 'circuit_open; intervenção manual necessária'
+        $script:circuitOpen = $true
+        Write-State 'recovering'
       }
+    }.GetNewClosure()
+    $startupResult = Invoke-NodarisStartupPolicy -Name $name -MaxRetries $maxRestarts `
+      -StopAction { Stop-Child $name }.GetNewClosure() `
+      -StartAction $startActions[$name] `
+      -HealthAction { Wait-ServiceHealth $name $healthChecks[$name] $timeouts[$name] }.GetNewClosure() `
+      -BackoffAction { param($seconds) Wait-NodarisBackoff $seconds }.GetNewClosure() `
+      -EventAction $startEventAction -FailureReasonAction { $script:lastAgentHealthReason } `
+      -StopRequestedAction { Test-Path -LiteralPath $stopFile }
+    $restartCounts[$name] = $startupResult.retryCount
+    if ($startupResult.status -eq 'stopped') {
+      $statuses[$name] = 'stopped_on_request'
+      Write-State 'stopping'
+      return
     }
-    if (-not $started) { throw "Inicialização de $name não foi concluída." }
+    if ($startupResult.status -eq 'circuit_open') { throw 'NODARIS_STARTUP_CIRCUIT_OPEN' }
   }
 }
 
 function Restart-Child([string]$Name) {
-  Stop-Child $Name
-  $restartCounts[$Name]++
-  if ($restartCounts[$Name] -gt $maxRestarts) {
-    $statuses[$Name] = 'circuit_open; intervenção manual necessária'
-    $script:circuitOpen = $true
-    Write-Diagnostic $Name 'recovery' 'failed' 'circuit_open' $restartCounts[$Name]
-    Write-State 'degraded'
-    return
-  }
-  $delay = Get-NodarisBackoffSeconds ($restartCounts[$Name] - 1)
-  $statuses[$Name] = "backoff_${delay}s"
-  $script:activeAttempt = $restartCounts[$Name]
   $recoveryTimeouts = @{ agent = 45; gateway = 30; tunnel = 45 }
   $script:activeTimeout = $recoveryTimeouts[$Name]
-  Write-Diagnostic $Name 'recovery' 'started' 'process_exited' $activeAttempt 0 $activeTimeout $delay
-  Write-Diagnostic $Name 'backoff' 'scheduled' 'retry_scheduled' $activeAttempt 0 $activeTimeout $delay
-  Write-State 'running'
-  $backoffTimer = [Diagnostics.Stopwatch]::StartNew()
-  Start-Sleep -Seconds $delay
-  $backoffTimer.Stop()
-  Write-Diagnostic $Name 'backoff' 'completed' 'retry_delay_elapsed' $activeAttempt $backoffTimer.ElapsedMilliseconds $activeTimeout $delay
-  switch ($Name) {
-    'agent' {
-      Start-Child 'agent' $nodeExe @($tsxCli, (Join-Path $repoRoot 'apps\agent\src\index.ts')) 3334
-      if (-not (Wait-ServiceHealth 'agent' { Test-AgentHealth } 45)) { throw 'NODARIS_HEALTH_TIMEOUT' }
-      $statuses.agent = 'healthy'
-      Write-Diagnostic 'agent' 'recovery' 'healthy' 'health_passed' $activeAttempt 0 $activeTimeout
-    }
-    'gateway' {
-      Start-Child 'gateway' $nodeExe @($tsxCli, (Join-Path $repoRoot 'apps\gateway\src\index.ts')) 3333
-      if (-not (Wait-ServiceHealth 'gateway' { Test-GatewayHealth } 30)) { throw 'NODARIS_HEALTH_TIMEOUT' }
-      $statuses.gateway = 'healthy'
-      Write-Diagnostic 'gateway' 'recovery' 'healthy' 'health_passed' $activeAttempt 0 $activeTimeout
-    }
-    'tunnel' {
-      $token = $env:NODARIS_TOKEN
-      $roots = $env:NODARIS_ALLOWED_ROOTS
-      Remove-Item Env:NODARIS_TOKEN -ErrorAction SilentlyContinue
-      Remove-Item Env:NODARIS_ALLOWED_ROOTS -ErrorAction SilentlyContinue
-      try { Start-Child 'tunnel' $tunnelExe @('run', '--profile-file', $profileFile) 8080 }
-      finally {
-        $env:NODARIS_TOKEN = $token
-        $env:NODARIS_ALLOWED_ROOTS = $roots
+  $stopAction = { Stop-Child $Name }.GetNewClosure()
+  $startAction = {
+    switch ($Name) {
+      'agent' { Start-Child 'agent' $nodeExe @('--import', 'tsx', (Join-Path $repoRoot 'apps\agent\src\index.ts')) 3334 }
+      'gateway' { Start-Child 'gateway' $nodeExe @('--import', 'tsx', (Join-Path $repoRoot 'apps\gateway\src\index.ts')) 3333 }
+      'tunnel' {
+        $token = $env:NODARIS_TOKEN
+        $roots = $env:NODARIS_ALLOWED_ROOTS
+        Remove-Item Env:NODARIS_TOKEN -ErrorAction SilentlyContinue
+        Remove-Item Env:NODARIS_ALLOWED_ROOTS -ErrorAction SilentlyContinue
+        try { Start-Child 'tunnel' $tunnelExe @('run', '--profile-file', $profileFile) 8080 }
+        finally {
+          $env:NODARIS_TOKEN = $token
+          $env:NODARIS_ALLOWED_ROOTS = $roots
+        }
       }
-      if (-not (Wait-ServiceHealth 'tunnel' { Test-TunnelLocalHealth } 45)) {
-        throw 'NODARIS_HEALTH_TIMEOUT'
-      }
-      $statuses.tunnel = 'healthy local; cliente tentará reconexão do plano de controle'
-      Write-Diagnostic 'tunnel' 'recovery' 'healthy' 'health_passed' $activeAttempt 0 $activeTimeout
     }
+  }.GetNewClosure()
+  $healthAction = {
+    $healthy = switch ($Name) {
+      'agent' { Wait-ServiceHealth 'agent' { Test-AgentHealth } 45 }
+      'gateway' { Wait-ServiceHealth 'gateway' { Test-GatewayHealth } 30 }
+      'tunnel' { Wait-ServiceHealth 'tunnel' { Test-TunnelLocalHealth } 45 }
+    }
+    if ($healthy) {
+      $statuses[$Name] = if ($Name -eq 'tunnel') { 'healthy local; readiness ChatGPT monitorada' } else { 'healthy' }
+      Write-State 'running'
+    }
+    return [bool]$healthy
+  }.GetNewClosure()
+  $eventAction = {
+    param($Stage, $Status, $ReasonCode, $Attempt, $Delay)
+    $script:activeAttempt = [int]$Attempt
+    Write-Diagnostic $Name $Stage $Status $ReasonCode $Attempt 0 $script:activeTimeout $Delay
+    if ($Stage -eq 'backoff') { $statuses[$Name] = "backoff_${Delay}s"; Write-State 'recovering' }
+    if ($ReasonCode -eq 'circuit_open') { $statuses[$Name] = 'circuit_open; intervenção manual necessária'; $script:circuitOpen = $true; Write-State 'recovering' }
+  }.GetNewClosure()
+  $policyResult = Invoke-NodarisRecoveryPolicy -Name $Name -ExistingRetries $restartCounts[$Name] -MaxRetries $maxRestarts `
+    -StopAction $stopAction -StartAction $startAction -HealthAction $healthAction `
+      -BackoffAction { param($seconds) Wait-NodarisBackoff $seconds }.GetNewClosure() `
+    -EventAction $eventAction -FailureReasonAction { $script:lastAgentHealthReason } `
+    -StopRequestedAction { Test-Path -LiteralPath $stopFile }
+  $restartCounts[$Name] = $policyResult.retryCount
+  if ($policyResult.status -eq 'circuit_open') {
+    $script:circuitOpen = $true
+    $statuses[$Name] = 'circuit_open; intervenção manual necessária'
+    Write-State 'recovering'
+  } elseif ($policyResult.status -eq 'stopped') {
+    $statuses[$Name] = 'stopped_on_request'
+    Write-State 'stopping'
+  } else {
+    Write-State 'running'
   }
 }
 
@@ -330,9 +336,10 @@ try {
   $configurationTimer = [Diagnostics.Stopwatch]::StartNew()
   Write-Diagnostic 'configuration' 'configuration' 'started' 'none' 1
   $nodeExe = (Get-Command node.exe -ErrorAction Stop).Source
-  foreach ($required in @($tokenFile, $profileFile, $tunnelExe, $tsxCli)) {
+  foreach ($required in @($tokenFile, $profileFile, $tunnelExe)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw 'Falta um arquivo local necessário; consulte o status sem divulgar segredos.' }
   }
+  if (-not (Test-Path -LiteralPath $tsxModule -PathType Container)) { throw 'Dependência local do agente indisponível; consulte o status sem divulgar segredos.' }
   $env:NODARIS_TOKEN = [IO.File]::ReadAllText($tokenFile).Trim()
   if ($env:NODARIS_TOKEN.Length -lt 32) { throw 'O arquivo Bearer local está vazio ou inválido.' }
   $configurationTimer.Stop()
@@ -346,7 +353,9 @@ try {
   Remove-Item -LiteralPath $stopFile -Force -ErrorAction SilentlyContinue
   Write-State 'starting'
   Start-Stack
-  Write-Diagnostic 'supervisor' 'lifecycle' 'healthy' 'health_passed' 1 $startupTimer.ElapsedMilliseconds
+  if (-not $circuitOpen -and -not (Test-Path -LiteralPath $stopFile)) {
+    Write-Diagnostic 'supervisor' 'lifecycle' 'healthy' 'health_passed' 1 $startupTimer.ElapsedMilliseconds
+  }
 
   while (-not $circuitOpen -and -not (Test-Path -LiteralPath $stopFile)) {
     $readinessTimer = [Diagnostics.Stopwatch]::StartNew()
@@ -370,17 +379,18 @@ try {
           $recoveryFailure = if ($_.Exception.Message -eq 'NODARIS_HEALTH_TIMEOUT') { $lastAgentHealthReason } elseif ($_.Exception.Message -eq 'NODARIS_PORT_IN_USE') { 'port_in_use' } else { 'process_start_failed' }
           Write-Diagnostic $name 'recovery' 'failed' $recoveryFailure $restartCounts[$name]
           Write-Diagnostic $name 'recovery' 'failed' 'circuit_open' $restartCounts[$name]
-          Write-State 'degraded'
+          Write-State 'recovering'
         }
       }
     }
     Start-Sleep -Seconds 3
   }
   $shutdownOrder = @('tunnel', 'gateway', 'agent')
-  foreach ($name in $shutdownOrder) {
-    Write-Diagnostic $name 'lifecycle' 'stopped' 'stop_requested' $restartCounts[$name]
+  Stop-NodarisChildrenInOrder -Names $shutdownOrder -StopAction {
+    param($name)
     Stop-Child $name
-  }
+    Write-Diagnostic $name 'lifecycle' 'stopped' 'stop_requested' $restartCounts[$name]
+  } | Out-Null
   Write-State $(if ($circuitOpen) { 'degraded' } else { 'stopped' })
 } catch {
   $reason = if ($startupPhase -eq 'configuration') { 'configuration_invalid' } else { 'startup_failed' }
@@ -391,7 +401,7 @@ try {
     $failureDuration = $configurationTimer.ElapsedMilliseconds
   }
   Write-Diagnostic $(if ($startupPhase -eq 'configuration') { 'configuration' } else { 'supervisor' }) 'lifecycle' 'failed' $reason 1 $failureDuration
-  foreach ($name in @('tunnel', 'gateway', 'agent')) { Stop-Child $name }
+  Stop-NodarisChildrenInOrder -Names @('tunnel', 'gateway', 'agent') -StopAction { param($name) Stop-Child $name } | Out-Null
   $statuses.agent = 'error; consulte procedimento local'
   Write-State $(if ($circuitOpen) { 'degraded' } else { 'error' })
 } finally {

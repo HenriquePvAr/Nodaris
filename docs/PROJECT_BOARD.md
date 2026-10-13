@@ -24,6 +24,15 @@ Conectar ChatGPT a projetos locais explicitamente autorizados por MCP privado, c
 
 ## Frentes e estado
 
+### M01.10 — Validação de recuperação (Fase A preparada)
+
+- `LIVE_RUNTIME`: OBSERVED — tarefa habilitada em `Ready`, conta Dell, Interactive/Limited, política `IgnoreNew`; supervisor PID 5000 e componentes agent 20212, gateway 19788, tunnel-client 9308; listeners 3334/3333/8080 ativos. Status reportou túnel `READY` (`ok/polling`, `poll_current`). `state.json` existe com ACL protegida para usuário + SYSTEM; `startup-events.jsonl` ainda não existe porque a instância ativa antecede o supervisor instrumentado. Apenas consultas foram executadas.
+- `LIFECYCLE_AUDIT`: FIXED_IN_REPOSITORY — startup e recuperação consomem retries/backoff antes de abrir circuito; parada percorre todos os componentes mesmo se um falhar; backoff respeita pedido de stop. `restart` exige parada confirmada. Agente/gateway agora rodam diretamente via Node `--import tsx` para evitar wrapper CLI que pudesse deixar processo filho órfão. A instância ativa não carregou essas correções.
+- `TEST_COVERAGE`: PASS — fixtures isoladas para parada ordenada, stop com falha parcial, startup/reinício, falha de health/porta e retry, backoff completo/cancelado, circuit breaker, mutex entre processos, estado/log sanitizados e rejeição de componente fora do escopo. Nenhum processo Nodaris real foi afetado.
+- `REAL_RECOVERY`: PENDING_OWNER_AUTHORIZATION — a Fase B exige parada/inicialização e encerramento controlado de filhos; nenhum desses atos foi executado. Gate de autorização pendente.
+- `CHATGPT_REVALIDATION`: PENDING — executar somente depois dos ensaios de recuperação autorizados pelo proprietário.
+- `TESTS`: PASS — 14/14 testes, typecheck, lint, formato, parser PowerShell e validação da importação `node --import tsx` passaram.
+
 ### M01.9 — Diagnóstico e observabilidade (13/10/2026)
 
 - `STARTUP_CAUSE`: NOT_DETERMINED — a amostra M01.8 identificou `restartCount=1`, mas não reteve eventos da transição; o log operacional do Agendador estava desabilitado. Não atribuir a demora a rede ou timeout sem evidência.

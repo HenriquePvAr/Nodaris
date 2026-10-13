@@ -2,6 +2,30 @@
 
 Atualizado em 13/10/2026. A conexão real pelo ChatGPT e a inicialização silenciosa após novo logon foram confirmadas pelo proprietário. A queda/restauração da internet e a recuperação após encerramento inesperado de serviços continuam pendentes.
 
+## M01.10 — inspeção da recuperação (Fase A)
+
+**Estado: Fase A concluída; Fase B aguarda autorização explícita.** A consulta local confirmou tarefa `Nodaris User Session` habilitada em `Ready`, usuário Dell, logon `Interactive`, nível `Limited`, política `IgnoreNew`, ação `wscript.exe` com `launcher.vbs`. Supervisor PID 5000 iniciou às 15:17:45; agente PID 20212 (filho Node PID 18440), gateway PID 19788 (filho Node PID 13560) e tunnel-client PID 9308 estavam na árvore. Portas loopback 3334, 3333 e 8080 estavam escutando. `nodaris.ps1 status` confirmou os três serviços saudáveis localmente e o túnel `ok/polling`, `tunnel_chatgpt_readiness=READY`, `poll_current`. O snapshot local preservava `restartCount=1` do agente e zero para gateway/túnel. A pasta do supervisor tinha ACL protegida para a conta atual e SYSTEM; `state.json` existia, mas `startup-events.jsonl` ainda não existia, pois a sessão ativa foi iniciada antes da implantação do supervisor instrumentado.
+
+A primeira consulta isolada foi limitada pelo sandbox ao tentar ler o estado protegido. A consulta de leitura repetida com acesso local autorizado confirmou os dados acima. A tarefa tinha `LastTaskResult=0` e permaneceu sem alteração. A árvore, o status, as portas e os arquivos locais foram apenas consultados; nenhum processo real foi iniciado, parado ou encerrado.
+
+**Falhas de implementação corrigidas na Fase A:** a recuperação de filho abria o circuito após uma única tentativa malsucedida, embora a política anunciasse até cinco retries. Agora o helper percorre tentativas, registra cada backoff e só abre o circuito ao atingir o limite. O comando `restart` também aguardava apenas dois segundos após `stop`; agora exige estado terminal confirmado em até 30 segundos e cancela o reinício se não houver confirmação. A parada final do supervisor usa uma única função que mantém a ordem tunnel-client → gateway → agente.
+
+O harness PowerShell isolado cobre parada em ordem e continuação após falha parcial, falha de porta/health e recuperação, sequência de reinício, backoff 5/15/30/60/120 e cancelamento durante backoff, circuito aberto, mutex verificado por outro processo PowerShell, integridade do log sanitizado e rejeição de componentes fora do escopo. O comando `node --import tsx` foi validado sem iniciar serviços. Esses fixtures não exercitam uma árvore de servidor real nem provam encerramento de processo órfão pelo Windows; o mecanismo anterior foi observado com wrappers e filhos Node, por isso a nova forma direta de execução e a parada real ainda precisam da janela controlada.
+
+`tunnel_chatgpt_readiness=READY` confirma polling recente do cliente ao control plane. Não demonstra que uma chamada MCP atravessou o túnel nem que o gateway e o agente responderam na mesma chamada; somente o reteste real das tools pelo ChatGPT fecha esse critério. No snapshot atual, o reteste MCP pelo ChatGPT ainda não foi repetido após aplicar as mudanças da Fase A, pois a instância ativa não foi reiniciada.
+
+### Gate antes da Fase B
+
+Serviços que a janela real afetará: agente PID 20212, gateway PID 19788, tunnel-client PID 9308 e, indiretamente, o supervisor PID 5000. A tarefa agendada só será invocada pelo procedimento de teste; nenhum reinício do Windows ou teste de rede está incluído.
+
+Sequência planejada: (1) capturar status, saúde, PIDs, readiness e fim do JSONL; (2) `stop`, confirmar estado terminal e portas liberadas; (3) `start`, medir agente → gateway → túnel e aguardar `READY`; (4) `restart`, verificar término dos PIDs antigos antes dos novos; (5) encerrar um PID filho validado por PID e relação com o supervisor, um componente de cada vez, observando evento, backoff e readiness após cada recuperação; (6) confirmar status e solicitar ao proprietário a revalidação real das sete ferramentas no ChatGPT.
+
+Indisponibilidade estimada: aproximadamente 2–4 minutos para stop/start ou restart saudável, considerando a amostra histórica de 2min43s até o agente, sem causa conhecida. A recuperação individual acrescenta o backoff corrente (agente 15s pela contagem atual; gateway e túnel 5s) e até 45s de health. O pior caso de startup, com seis tentativas e todos os timeouts/backoffs no limite, é aproximadamente 23min30s. A parada controlada tem limite de confirmação de 30 segundos; em timeout, `restart` cancela e não lança uma segunda instância.
+
+Recuperação manual: consultar `scripts/windows/nodaris.ps1 status`; se o stop/restart não confirmar, não abrir outro supervisor nem encerrar processo por nome. Registrar a saída sanitizada e pedir orientação antes de qualquer intervenção fora do procedimento. Critérios de interrupção: timeout de parada, porta ainda ocupada, PID inesperado, evento `circuit_open`, readiness perdida ou comportamento diferente do processo autorizado.
+
+**Resultados Fase B:** `STOP_RECOVERY=PENDING_AUTHORIZATION`; `START_RECOVERY=PENDING_AUTHORIZATION`; `RESTART_RECOVERY=PENDING_AUTHORIZATION`; `PROCESS_FAILURE_RECOVERY=PENDING_AUTHORIZATION`; `CHATGPT_REVALIDATION=PENDING_AUTHORIZATION`. Não marcar PASS com base apenas nos fixtures.
+
 ## Estado antes dos testes
 
 - Agente, gateway e `tunnel-client v0.0.15` estavam ativos em `127.0.0.1:3334`, `127.0.0.1:3333` e `127.0.0.1:8080`.
