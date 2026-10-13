@@ -24,13 +24,15 @@ Conectar ChatGPT a projetos locais explicitamente autorizados por MCP privado, c
 
 ## Frentes e estado
 
-### M01.10 — Validação de recuperação (Fase A preparada)
+### M01.10 — Validação de recuperação (B1.2 concluída)
 
-- `LIVE_RUNTIME`: OBSERVED — tarefa habilitada em `Ready`, conta Dell, Interactive/Limited, política `IgnoreNew`; supervisor PID 5000 e componentes agent 20212, gateway 19788, tunnel-client 9308; listeners 3334/3333/8080 ativos. Status reportou túnel `READY` (`ok/polling`, `poll_current`). `state.json` existe com ACL protegida para usuário + SYSTEM; `startup-events.jsonl` ainda não existe porque a instância ativa antecede o supervisor instrumentado. Apenas consultas foram executadas.
-- `LIFECYCLE_AUDIT`: FIXED_IN_REPOSITORY — startup e recuperação consomem retries/backoff antes de abrir circuito; parada percorre todos os componentes mesmo se um falhar; backoff respeita pedido de stop. `restart` exige parada confirmada. Agente/gateway agora rodam diretamente via Node `--import tsx` para evitar wrapper CLI que pudesse deixar processo filho órfão. A instância ativa não carregou essas correções.
+- `LIVE_RUNTIME`: PASS — após a transição controlada, supervisor PID 9376, agente 7036, gateway 12508 e tunnel-client 11312 estavam ativos, sem duplicatas. Portas 3334/3333/8080 estavam em loopback e correspondiam aos serviços esperados. Estado e `startup-events.jsonl` atualizados; ACL restrita à conta atual + SYSTEM. Não foi iniciado outro ciclo após a revalidação.
+- `LIFECYCLE_AUDIT`: FIXED_AND_OBSERVED — startup e recuperação consomem retries/backoff antes de abrir circuito; parada percorre os componentes; backoff respeita pedido de stop. `restart` exige parada confirmada. Agente/gateway rodam diretamente via Node `--import tsx`; a parada supervisionada e a inicialização corrigida foram comprovadas na B1.2.
 - `TEST_COVERAGE`: PASS — fixtures isoladas para parada ordenada, stop com falha parcial, startup/reinício, falha de health/porta e retry, backoff completo/cancelado, circuit breaker, mutex entre processos, estado/log sanitizados e rejeição de componente fora do escopo. Nenhum processo Nodaris real foi afetado.
-- `REAL_RECOVERY`: PENDING_OWNER_AUTHORIZATION — a Fase B exige parada/inicialização e encerramento controlado de filhos; nenhum desses atos foi executado. Gate de autorização pendente.
-- `CHATGPT_REVALIDATION`: PENDING — executar somente depois dos ensaios de recuperação autorizados pelo proprietário.
+- `B1_STOP_RECOVERY`: PASS — uma única parada oficial foi confirmada em 9,15 s; supervisor e descendentes terminaram, sem órfãos, estado `stopped` e portas liberadas.
+- `B1_START_RECOVERY`: PASS — uma única inicialização oficial da versão instrumentada; health autenticado, componentes saudáveis e `tunnel_chatgpt_readiness=READY` em 47,52 s a partir da solicitação de início.
+- `CHATGPT_REVALIDATION`: PASS — o proprietário confirmou chamadas reais pelo ChatGPT a `nodaris_health`, `nodaris_projects_list`, `nodaris_file_read` (README.md) e `nodaris_git_status`. O Git informou `main` sincronizada com `origin/main`; somente `docs/status/` permanece não rastreado.
+- `PHASE_B2`: PENDING_OWNER_AUTHORIZATION — novo restart e recuperação após falha controlada de processo aguardam autorização específica. Não iniciar outro ciclo nesta etapa.
 - `TESTS`: PASS — 14/14 testes, typecheck, lint, formato, parser PowerShell e validação da importação `node --import tsx` passaram.
 
 ### M01.9 — Diagnóstico e observabilidade (13/10/2026)
