@@ -37,7 +37,16 @@ Conectar ChatGPT a projetos locais explicitamente autorizados por MCP privado, c
 - `B2_TELEMETRY`: PASS — JSONL registrou detecção de saída, backoff agendado/concluído, processo iniciado, health e readiness. Sem conteúdo sensível.
 - `CHATGPT_REVALIDATION`: PASS — proprietário confirmou 4/4 chamadas reais após B2: health, lista de projetos, leitura do README e Git status, todas na primeira tentativa. `main` sincronizada com `origin/main`; somente `docs/status/` não rastreado.
 - `TESTS`: PASS — 14/14 testes, typecheck, lint, formatação, parse PowerShell e `git diff --check` passaram nesta consolidação.
-- `M01.11_NETWORK_RECONNECT`: PLANNED — plano preparado em `STABILITY_TESTS.md`; depende de autorização específica para desconectar/restaurar a rede. Nenhuma desconexão foi feita.
+- `M01.11_NETWORK_RECONNECT`: PARTIAL — o evento WLAN 8003 ocorreu às 17:04:44.095 e o 8001 às 17:05:47.463 (UTC−04), intervalo de 63,367 s, acima do limite de 60 s. O tunnel-client voltou a `READY` às 17:06:38 após Internet observada às 17:06:07; PIDs e contadores de restart dos serviços foram preservados. O monitor local registrou dez falhas de sondagem durante a queda; a revalidação real pelo ChatGPT foi confirmada pelo proprietário em 4/4 chamadas. Evidências e limitações em `STABILITY_TESTS.md` e no JSONL local protegido.
+
+### M01.11 — Reconexão de internet (13/10/2026, PARTIAL)
+
+- `WIFI_TRANSITION`: PARTIAL — o log operacional `Microsoft-Windows-WLAN-AutoConfig/Operational` registrou evento 8003 às 17:04:44.095 e evento 8001 às 17:05:47.463 (UTC−04). O intervalo foi 63,367 s, 3,367 s acima do limite autorizado. Não repetir a interrupção nesta missão.
+- `TUNNEL_RECOVERY`: PASS — primeira amostra com Internet às 17:06:07.482; readiness `READY` às 17:06:38.217; telemetria posterior registrou `poll_current`. Não foi necessário reiniciar processos.
+- `PROCESS_PRESERVATION`: PASS — supervisor 2388, agente 9136, gateway 16284 e tunnel-client 13516 permaneceram iguais; três filhos diretos, uma instância por serviço, listeners em loopback e `restartCount=1` para cada componente. As amostras pós-restauração mantiveram health e readiness saudáveis.
+- `OBSERVABILITY`: PARTIAL — o observador independente do Codex registrou dez `sample_failed/local_probe_failed` entre 17:04:48 e 17:05:47 e não emitiu marcadores próprios de desconexão/restauração. Os eventos WLAN forneceram os horários da associação; a causa técnica específica da falha de sondagem não foi identificada. O JSONL sanitizado original permanece em `%LOCALAPPDATA%\Nodaris\supervisor\network-reconnect-M01.11-20261013.jsonl`.
+- `CHATGPT_REVALIDATION`: PASS — proprietário confirmou `nodaris_health`, `nodaris_projects_list`, `nodaris_file_read` (`README.md`) e `nodaris_git_status`, 4/4; `main` sincronizada com `origin/main` na consulta.
+- **Classificação M01.11: PARTIAL.** A recuperação automática foi comprovada, mas o intervalo ultrapassou o limite e a observabilidade foi incompleta. Correção preventiva proposta: separar as sondagens locais de rede, health MCP, readiness do túnel e leitura JSONL, registrando falha individual sem bloquear as demais. Não implementar nem repetir o teste nesta etapa.
 
 ### M01.9 — Diagnóstico e observabilidade (13/10/2026)
 
@@ -69,14 +78,14 @@ Conectar ChatGPT a projetos locais explicitamente autorizados por MCP privado, c
 - M01.7: tarefa de logon instalada; scripts de supervisão local preparados; validação após reinício, interrupção de serviço e queda de rede continua pendente. Nenhum serviço foi parado nesta tarefa.
 - Uso comercial depende de autorização separada conforme a licença; contribuições externas requerem confirmação explícita dos termos documentados.
 
-| Frente                  | Estado                                                                              | Próxima ação                                            |
-| ----------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| Fundação                | MVP local e raiz única validados; conexão real ChatGPT confirmada pelo proprietário | Executar M01.11 após autorização para teste de rede     |
-| Filesystem/Git          | Sete ferramentas reais chamadas; leitura e busca retornaram dados locais            | Revalidar após o teste M01.11 autorizado                |
-| Integração MCP          | Gateway Streamable HTTP; bearer obrigatório; ferramentas só leitura                 | Manter confirmação de isolamento                        |
-| Secure MCP Tunnel       | Runtime key autenticada; recuperação de processo validada; `ok/polling`             | Medir reconexão após indisponibilidade de rede          |
-| Integrações open source | Avaliadas; nenhuma ferramenta com escrita foi exposta                               | Serena M02, MetaMCP M03, conforme decisões documentadas |
-| Nodaris Teams           | Ideia futura, sem implementação                                                     | Avaliar somente após estabilização local                |
+| Frente                  | Estado                                                                              | Próxima ação                                             |
+| ----------------------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| Fundação                | MVP local e raiz única validados; conexão real ChatGPT confirmada pelo proprietário | Revisar limitações de observabilidade antes de nova fase |
+| Filesystem/Git          | Sete ferramentas reais chamadas; leitura e busca retornaram dados locais            | ChatGPT revalidado em M01.11 (4/4)                       |
+| Integração MCP          | Gateway Streamable HTTP; bearer obrigatório; ferramentas só leitura                 | Manter confirmação de isolamento                         |
+| Secure MCP Tunnel       | Runtime key autenticada; recuperação após queda de Wi‑Fi observada; `READY` voltou  | Melhorar monitor local antes de novo ensaio de rede      |
+| Integrações open source | Avaliadas; nenhuma ferramenta com escrita foi exposta                               | Serena M02, MetaMCP M03, conforme decisões documentadas  |
+| Nodaris Teams           | Ideia futura, sem implementação                                                     | Avaliar somente após estabilização local                 |
 
 ## Estados independentes M01.5 (histórico)
 
@@ -102,6 +111,6 @@ Conectar ChatGPT a projetos locais explicitamente autorizados por MCP privado, c
 ## Próximos passos
 
 1. Proprietário remover manualmente a cópia TXT temporária da runtime key em Downloads.
-2. Executar o teste de reconexão de internet da M01.11 somente após autorização específica; plano em [STABILITY_TESTS.md](guides/STABILITY_TESTS.md).
-3. Manter a raiz exclusiva autorizada e repetir as chamadas ChatGPT após o cenário de rede.
-4. Não iniciar M02 antes de concluir a estabilidade local M01.
+2. Revisar e autorizar separadamente qualquer melhoria do monitor local; não repetir a interrupção de rede nesta missão.
+3. Manter a raiz exclusiva autorizada e preservar a evidência M01.11 PARTIAL.
+4. Não iniciar M02 antes da revisão da auditoria M01.12.

@@ -1,10 +1,10 @@
 # Plano de testes de estabilidade M01.9
 
-Atualizado em 13/10/2026. A conexão real pelo ChatGPT, inicialização silenciosa, restart supervisionado e recuperação individual dos três componentes foram confirmados. A queda/restauração da internet continua pendente de autorização específica.
+Atualizado em 13/10/2026. A conexão real pelo ChatGPT, inicialização silenciosa, restart supervisionado, recuperação individual dos três componentes e reconexão após queda de Wi‑Fi foram observados. M01.11 ficou PARTIAL: a WLAN levou 63,367 s para reconectar (limite de 60 s) e o monitor teve lacunas. Não repetir teste de rede nesta missão.
 
 ## M01.10 — recuperação controlada (B1.2 e B2 concluídas)
 
-**Estado: B1.2 e B2 concluídas; M01.11 aguarda autorização para teste de rede.** A inspeção da Fase A e o plano inicial da B2 são preservados como histórico; as evidências reais das duas etapas estão registradas abaixo. Nenhum reinício do Windows ou interrupção de rede foi executado.
+**Estado: B1.2 e B2 concluídas; M01.11 executada com resultado PARTIAL.** A inspeção da Fase A e o plano inicial da B2 são preservados como histórico; as evidências reais das etapas estão registradas abaixo. Nenhum reinício do Windows foi executado.
 
 ### Evidência da transição B1.2 — 13/10/2026
 
@@ -40,13 +40,21 @@ O harness PowerShell isolado cobre parada em ordem e continuação após falha p
 
 `tunnel_chatgpt_readiness=READY` comprova polling recente do cliente ao control plane, mas não substitui chamada MCP ponta a ponta. Na M01.10, readiness local e quatro chamadas reais do ChatGPT foram verificadas separadamente.
 
-### M01.11 — reconexão de internet (planejada; não executada)
+### M01.11 — reconexão de internet (resultado PARTIAL, 13/10/2026)
 
-Objetivo: observar o comportamento do tunnel-client v0.0.15 e do supervisor durante uma interrupção temporária de conectividade e após a restauração, sem reiniciar o Nodaris.
+**Pré-verificação:** às 17:04:09 (America/Manaus, UTC−04), o observador registrou health MCP autenticada OK, Wi‑Fi `Up`, conectividade `Internet`, `READY`, supervisor 2388, agente 9136, gateway 16284 e tunnel-client 13516. Havia um supervisor e três filhos diretos; listeners 3333/3334/8080 em `127.0.0.1`; os contadores de reinício eram 1 em cada serviço. O observador local foi executado independentemente do Codex, sob a conta atual, sem controlar adaptador ou serviços.
 
-Plano proposto para uma janela autorizada: (1) registrar status, PIDs/árvore, listeners loopback, health/readiness e fim do JSONL; (2) proprietário desconectar a internet por até 60 s, sem alterar firewall; (3) acompanhar health local e eventos de polling, distinguindo perda do control plane de falha local; (4) proprietário restaurar a conexão; (5) observar a volta a `READY` por até 5 min, sem reiniciar processos; (6) confirmar health, lista de projetos, leitura do README e Git status pelo ChatGPT e registrar tempos.
+**Transição Wi‑Fi:** o log `Microsoft-Windows-WLAN-AutoConfig/Operational` registrou evento 8003 às 17:04:44.095 e evento 8001 às 17:05:47.463 (UTC−04). A diferença foi 63,367 s, cerca de 3,367 s acima do limite autorizado de 60 s. O log fornece os eventos de desconexão e reassociação WLAN; não usar esses eventos como timestamp de restauração completa da Internet.
 
-Interromper a observação se algum processo Nodaris terminar, o agente/gateway perderem health, surgir listener externo, PID duplicado/desconhecido ou circuito aberto. Não executar stop/start/restart como parte do teste de rede. Se readiness não voltar em 5 min, encerrar a janela de observação e apresentar diagnóstico antes de qualquer ação de recuperação. A desconexão física/da interface e a restauração dependem de autorização expressa do proprietário e ainda não foram realizadas.
+**Recuperação:** o primeiro probe bem-sucedido com `Internet` ocorreu às 17:06:07.482; health MCP estava OK, o supervisor tinha um processo e três filhos, mas o túnel ainda estava `WAITING`. A primeira amostra `READY` veio às 17:06:38.217, 30,735 s após a primeira amostra com Internet. O JSONL do supervisor registrou `control_plane_not_polling` às 17:05:06.723 e `poll_current` às 17:06:40.705. Após a recuperação, as amostras mantiveram health OK e `READY`. A última coleta às 17:09:21.739 confirmou novamente Wi‑Fi/Internet ativos, `READY`, PIDs 2388/9136/16284/13516 inalterados, um supervisor, três filhos diretos e listeners loopback. Cada contador de restart continuou em 1; não houve reinicialização manual, duplicata ou circuito aberto observado.
+
+**Lacuna de observabilidade:** dez sondagens falharam entre 17:04:48.456 e 17:05:47.358, registradas como `sample_failed/local_probe_failed`. O monitor combinava o snapshot PowerShell, health MCP e health do túnel em uma única operação `Promise.all`; uma falha em qualquer probe descartava a amostra inteira. A leitura dos eventos do supervisor também ocorria somente depois de uma amostra completa. Assim, o JSONL do monitor não registrou `wifi_disconnected_observed` nem `internet_restored_observed`; a causa técnica específica do `local_probe_failed` não foi identificada. O arquivo original sanitizado foi preservado em `%LOCALAPPDATA%\Nodaris\supervisor\network-reconnect-M01.11-20261013.jsonl`, com ACL da conta atual e SYSTEM.
+
+**Correção preventiva proposta, ainda não implementada:** para uma validação futura, executar probes locais independentes e com timeouts próprios para adaptador/rota, MCP local, readiness do túnel e leitura do JSONL; registrar cada resultado mesmo quando outro probe falhar. O coletor deve manter heartbeats monotônicos, consultar o log WLAN por IDs e timestamps sem SSID, e consolidar os marcos após o ensaio. Essa alteração requer revisão antes de implementação. Não repetir a queda de rede nesta missão.
+
+**Ponta a ponta:** o proprietário confirmou após a restauração `nodaris_health`, `nodaris_projects_list`, `nodaris_file_read` (`README.md`) e `nodaris_git_status`, 4/4 PASS; `main` sincronizada com `origin/main` na consulta. Isso confirma a conexão ChatGPT, mas não remove a classificação PARTIAL do ensaio, pois o intervalo superou o limite autorizado e a coleta local teve lacunas.
+
+**Classificação M01.11: PARTIAL — recuperação automática comprovada; limite de 60 s excedido e observabilidade incompleta.** Não houve restart, alteração de firewall, credenciais, allowlist ou licença. O monitor temporário foi encerrado depois da coleta; os serviços Nodaris permaneceram ativos.
 
 ## Estado antes dos testes
 
@@ -58,11 +66,11 @@ Interromper a observação se algum processo Nodaris terminar, o agente/gateway 
 
 ## Tarefa de logon e supervisor
 
-**Estado: inicialização automática silenciosa e recuperação supervisionada confirmadas; reconexão de internet pendente.** Os scripts em `scripts/windows/` criam tarefa no logon interativo do usuário atual, nível `Limited`, sem `SYSTEM`. A definição não contém segredos. A inicialização é sequencial: agente (health autenticado), gateway (listener de loopback), tunnel-client (perfil fixado). Uma única instância é solicitada pelo Agendador e mutex local; conflito de porta interrompe a tentativa em vez de abrir outro listener.
+**Estado: inicialização automática silenciosa, recuperação supervisionada e reconexão de internet observadas; M01.11 PARTIAL.** Os scripts em `scripts/windows/` criam tarefa no logon interativo do usuário atual, nível `Limited`, sem `SYSTEM`. A definição não contém segredos. A inicialização é sequencial: agente (health autenticado), gateway (listener de loopback), tunnel-client (perfil fixado). Uma única instância é solicitada pelo Agendador e mutex local; conflito de porta interrompe a tentativa em vez de abrir outro listener.
 
-Use `scripts/windows/nodaris.ps1 install|start|stop|restart|status|enable|disable|uninstall`. A instalação não inicia nem encerra processos ativos. O supervisor observa somente a saída dos próprios processos, usa backoff 5/15/30/60/120 segundos e abre circuito após cinco tentativas. Ele não reinicia tunnel-client por perda de internet: o cliente v0.0.15 documenta polling com retry/backoff de erros de transporte ([código/documentação oficial](https://github.com/openai/tunnel-client/blob/v0.0.15/pkg/controlplane/doc.go)); health/readiness precisam ser observados após a restauração. Essa capacidade documentada ainda não substitui o teste real de queda/restauração.
+Use `scripts/windows/nodaris.ps1 install|start|stop|restart|status|enable|disable|uninstall`. A instalação não inicia nem encerra processos ativos. O supervisor observa somente a saída dos próprios processos, usa backoff 5/15/30/60/120 segundos e abre circuito após cinco tentativas. Ele não reinicia tunnel-client por perda de internet: o cliente v0.0.15 documenta polling com retry/backoff de erros de transporte ([código/documentação oficial](https://github.com/openai/tunnel-client/blob/v0.0.15/pkg/controlplane/doc.go)); a recuperação foi observada em M01.11, com as limitações registradas acima.
 
-As operações reais `stop`, `restart`, proteção contra duplicatas e recuperação de cada processo foram validadas na M01.10 B1.2/B2, com autorização específica e sem force-kill por nome. A desconexão/restauração de internet segue pendente de autorização própria.
+As operações reais `stop`, `restart`, proteção contra duplicatas e recuperação de cada processo foram validadas na M01.10 B1.2/B2, com autorização específica e sem force-kill por nome. A reconexão Wi‑Fi foi observada em M01.11 e classificada PARTIAL; não repetir a queda de rede nesta missão.
 
 ## Smoke checks M01.7 — 13/10/2026
 
@@ -115,15 +123,7 @@ O fixture Windows `tests/fixtures/windows/diagnostics-smoke.ps1` cobre tentativa
 
 ## Cenário B — perda e restauração de internet
 
-**Status: PENDING / NÃO EXECUTADO.**
-
-1. Executar em uma janela de teste com acesso local ao computador. Manter os processos Nodaris ativos e confirmar o estado saudável e uma chamada real de referência pelo ChatGPT.
-2. Interromper temporariamente o acesso externo à internet usando um método reversível escolhido pelo proprietário. Não alterar firewall, portas inbound, allowlist, credenciais ou configurações do gateway.
-3. Observar localmente `/healthz`, `/readyz` e somente os campos de estado do componente `control-plane` em `/health?details=true`. Não registrar headers, tokens, corpos MCP ou logs HTTP brutos.
-4. Anotar se o processo continua vivo, como o plano de controle reporta a falha e se o MCP remoto fica temporariamente indisponível. Não classificar uma falha durante o corte como defeito de segurança nem como reconexão aprovada.
-5. Restaurar a internet. Aguardar `control-plane: ok/polling` e readiness local; anotar o tempo de recuperação.
-6. Repetir as sete chamadas reais do ChatGPT listadas no Cenário A e confirmar leitura e busca de dados locais apenas do projeto Nodaris.
-7. O cenário só passa se a mesma instalação se recuperar sem ampliar acesso, desativar Bearer ou reiniciar/reconfigurar manualmente componentes fora do procedimento previsto. Se for necessária intervenção manual, documentar o resultado como recuperação manual e revisar a meta antes de marcar PASS.
+**Status para M01.11: EXECUTADO / PARTIAL.** A recuperação de polling e readiness, a preservação dos processos e a revalidação ChatGPT foram confirmadas; o intervalo da WLAN superou o limite de 60 s e o observador teve dez sondagens falhas. Os timestamps e as limitações estão em “M01.11 — reconexão de internet”. Não repetir o cenário de rede nesta missão.
 
 ## Registro de resultado
 
@@ -131,6 +131,6 @@ O fixture Windows `tests/fixtures/windows/diagnostics-smoke.ps1` cobre tentativa
 | ------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | Conexão real ChatGPT            | PASS, confirmada pelo proprietário em 13/10/2026 | Sete ferramentas; leitura de README e busca com dados locais; projeto Nodaris exclusivo                                                      |
 | Reinício do Windows             | PASS                                             | Proprietário confirmou tarefa automática silenciosa e consultas locais pelo ChatGPT; latência fina pendente da próxima amostra instrumentada |
-| Queda e restauração de internet | PENDING                                          | Estado do polling durante/depois, tempo até recuperação e chamadas reais após a restauração                                                  |
+| Queda e restauração de internet | PARTIAL                                          | WLAN 8003/8001; primeira amostra Internet 17:06:07; READY 17:06:38; ChatGPT 4/4; monitor com dez falhas; interrupção 63,367 s (>60 s)        |
 
 Não alterar o dashboard `docs/status/` durante esses ensaios sem aprovação específica; atualizar este registro e `docs/PROJECT_BOARD.md` com resultados observados.
