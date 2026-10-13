@@ -17,4 +17,8 @@ Use Node 22 ou 24 e pnpm 12. Instale com `pnpm install`. Gere token aleatório d
 
 ## Limitações
 
-O agente mantém a descoberta até reiniciar. A M01 não tem instalação de serviço Windows, UI, reconexão automática, gestão de tokens, rotação ou transporte autenticado mTLS entre processos. O token bearer local deve ser tratado como segredo.
+O agente descobre os projetos ao iniciar; reiniciar o processo refaz a descoberta. O gateway encaminha cada chamada ao agente e não mantém fila de recuperação. Os comandos `pnpm dev:*` são processos interativos: não há serviço Windows, tarefa agendada, supervisor de processos nem início automático configurado. Uma queda fatal exige iniciar novamente o processo correspondente.
+
+O `tunnel-client` executa seu loop de polling enquanto o processo está ativo. O estado atual `control-plane: ok/polling` confirma comunicação no momento da observação, mas a recuperação após interrupção de rede ainda precisa ser testada. Não presumir reconexão ponta a ponta só porque o processo voltou a responder localmente; verifique o estado do plano de controle e repita chamadas reais do ChatGPT conforme o [plano de estabilidade](STABILITY_TESTS.md).
+
+Não salve `NODARIS_TOKEN` no repositório, no histórico de comandos ou em argumentos. A inicialização manual deve reutilizar o mecanismo local protegido de segredo e a raiz explicitamente autorizada. Não usar `.env` real nem ampliar `NODARIS_ALLOWED_ROOTS` durante uma recuperação.

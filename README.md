@@ -4,7 +4,9 @@ O Nodaris conecta um cliente MCP a projetos locais por meio de um gateway Stream
 
 ## Estado da M01
 
-MVP local versionado e validado em `main`; nenhuma raiz de projeto real está cadastrada por padrão. O acesso real ao ChatGPT depende da aprovação de uma raiz e da configuração do Secure MCP Tunnel, e ainda não foi testado neste ambiente.
+MVP local versionado em `main`. Em 13/10/2026, o proprietário confirmou uma conexão real pelo ChatGPT ao computador Nodaris: foram chamadas `nodaris_health`, `nodaris_projects_list`, `nodaris_project_tree`, `nodaris_file_read`, `nodaris_code_search`, `nodaris_git_status` e `nodaris_git_log`. A leitura de `README.md` e a busca retornaram conteúdo local, e foi identificado somente o projeto Nodaris. As ferramentas permanecem somente leitura.
+
+A raiz autorizada para esse ensaio é exclusivamente `C:\Users\Dell\Downloads\Nodaris`; novas instalações continuam sem raízes configuradas por padrão. O agente, gateway e `tunnel-client` estão em loopback. A inicialização automática no Windows não está configurada. Reinício do Windows e recuperação após queda de internet permanecem sem teste; veja [plano de estabilidade](docs/guides/STABILITY_TESTS.md).
 
 ## Requisitos
 
@@ -44,4 +46,4 @@ pnpm format:check
 pnpm test
 ```
 
-Veja [desenvolvimento](docs/guides/DEVELOPMENT.md), [implantação local](docs/guides/DEPLOYMENT.md), [autenticação GitHub](docs/guides/GITHUB_AUTH.md), [conexão ChatGPT](docs/guides/CHATGPT_TUNNEL.md), [arquitetura](docs/architecture/ARCHITECTURE.md) e [segurança](docs/security/SECURITY.md).
+Veja [desenvolvimento](docs/guides/DEVELOPMENT.md), [implantação local](docs/guides/DEPLOYMENT.md), [plano de estabilidade](docs/guides/STABILITY_TESTS.md), [autenticação GitHub](docs/guides/GITHUB_AUTH.md), [conexão ChatGPT](docs/guides/CHATGPT_TUNNEL.md), [arquitetura](docs/architecture/ARCHITECTURE.md) e [segurança](docs/security/SECURITY.md).
