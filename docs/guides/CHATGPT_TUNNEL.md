@@ -1,6 +1,6 @@
 # Preparação da conexão privada com ChatGPT
 
-Estado em 13/10/2026: agente e gateway foram iniciados em loopback e o gateway foi validado por chamadas MCP reais contra a raiz autorizada `C:\Users\Dell\Downloads\Nodaris`. O cliente oficial `tunnel-client v0.0.15` foi instalado localmente, sem credenciais OpenAI. O túnel e a conexão pelo ChatGPT continuam pendentes de configuração manual na OpenAI Platform; ainda não houve chamada real pelo ChatGPT. Não abrir porta inbound pública.
+Estado em 13/10/2026: agente e gateway foram iniciados em loopback e o gateway foi validado por chamadas MCP reais contra a raiz autorizada `C:\Users\Dell\Downloads\Nodaris`. O cliente oficial `tunnel-client v0.0.15` está instalado e o perfil local `nodaris-local` foi criado. `doctor --explain` passou após o gateway responder 404 em rotas fora de `/mcp`; `/mcp` continua exigindo Bearer. A consulta autenticada de leitura ao túnel OpenAI retornou HTTP 401 e `tunnel-client run` encerrou antes de abrir o listener. ChatGPT ainda não foi conectado. Não abrir porta inbound pública.
 
 ## Pré-requisitos do gate
 
@@ -31,25 +31,31 @@ O ZIP Windows amd64 do `tunnel-client v0.0.15` teve SHA-256 conferido com `SHA25
 - `pnpm test`: 9/9 testes aprovados; `pnpm typecheck`: aprovado.
 - Essas evidências validam o Nodaris local, não o túnel nem o ChatGPT.
 
+## Estado M01.3
+
+- A runtime key foi importada do TXT local para `%LOCALAPPDATA%\Nodaris\secrets\control-plane-api-key.txt`; o conteúdo não foi impresso, passado em argumentos, registrado em log ou salvo no repositório. A pasta e o arquivo têm ACL somente para a conta Windows atual e SYSTEM.
+- O TXT de origem permanece no local original até a autenticação do túnel ser validada; depois da validação, orientar o proprietário a apagar essa cópia temporária.
+- Perfil `nodaris-local`: `control_plane.api_key` usa `file:`, MCP aponta para `http://127.0.0.1:3333/mcp`, e os cabeçalhos runtime e discovery referenciam o arquivo Bearer local protegido.
+- `tunnel-client doctor --profile nodaris-local --explain`: PASS. `/mcp` retornou 401 sem Bearer nas probes; os metadados OAuth ausentes retornaram 404 e a checagem reconheceu o servidor MCP sem OAuth.
+- Consulta read-only `tunnel-client admin tunnels get` com a runtime key: HTTP 401. Não atribuir causa sem verificação na Platform. `tunnel-client run` encerrou; `/healthz`, `/readyz` e `/ui` ainda não foram validados.
+- ChatGPT plugin e conexão real: pendentes. Não marcar PASS antes de chamadas ChatGPT reais.
+
 ## Procedimento após liberação
 
-1. Na OpenAI Platform, criar/confirmar o túnel na organização e workspace pessoais autorizados e confirmar as permissões Tunnels Read + Use. O usuário deverá informar somente o `tunnel_id` (nunca a runtime key).
-2. Criar uma runtime key com Tunnels Read + Use e provisioná-la localmente, sem enviá-la pelo chat. O usuário precisa confirmar quando a chave estiver disponível localmente.
-3. Gerar perfil `sample_mcp_remote_no_auth` para `http://127.0.0.1:3333/mcp`, usando o `tunnel_id` real e referência de segredo para `CONTROL_PLANE_API_KEY`; configurar `Authorization` via `file:` para `%LOCALAPPDATA%\Nodaris\gateway-authorization.txt`.
-4. Executar `tunnel-client doctor --profile <perfil> --explain`. Se doctor exigir OAuth/PRMD incompatível com a modalidade selecionada, parar e documentar a necessidade de rever autenticação, sem remover o Bearer.
-5. Iniciar `tunnel-client` e confirmar `/healthz`, `/readyz` e `/ui` em loopback.
-6. No ChatGPT, criar o connector no workspace correto. Usar sem autenticação no lado ChatGPT apenas se a identidade de serviço compartilhada for aceita para esse workspace.
-7. Validar `nodaris_projects_list` e `nodaris_file_read` em chamada real pelo ChatGPT. Só então marcar a conexão ponta a ponta como PASS.
+1. Verificar localmente a runtime API key existente: a consulta read-only com a chave importada recebeu HTTP 401; confirmar na Platform se é a runtime key ativa, com Tunnels Read + Use, da mesma organização do túnel, e regravar o arquivo local com a chave existente correta, sem enviá-la no chat.
+2. Revalidar com `tunnel-client admin tunnels get <tunnel_id>` usando a runtime key por referência segura. Não iniciar `run` até a consulta ser aceita.
+3. Após autenticação aprovada, iniciar `tunnel-client run --profile nodaris-local` e confirmar `/healthz`, `/readyz` e `/ui` em loopback.
+4. No ChatGPT, criar o connector no workspace correto. Usar sem autenticação no lado ChatGPT apenas se a identidade de serviço compartilhada for aceita para esse workspace.
+5. Validar `nodaris_projects_list` e `nodaris_file_read` em chamada real pelo ChatGPT. Só então marcar a conexão ponta a ponta como PASS.
 
 ## Dados que faltam para executar Etapa B/C
 
-- `tunnel_id` criado/confirmado pelo usuário na Platform.
-- runtime API key criada pelo usuário e provisionada localmente (não enviar em chat nem gravar no repositório).
-- confirmação visual de Tunnels Read + Use e associação com organização/workspace pessoais autorizados.
+- confirmar que a runtime key existente está ativa, possui Tunnels Read + Use e pertence à mesma organização do túnel; a chave importada recebeu HTTP 401.
+- confirmar que o túnel permanece associado ao workspace pessoal correto e que a runtime key pode usá-lo.
 - permissão no workspace ChatGPT para custom MCP server.
 - confirmação do usuário de que a configuração da Platform e a runtime key local foram concluídas.
 - confirmar se o modelo de identidade de serviço compartilhada com header estático satisfaz a política do workspace; caso contrário, desenhar OAuth Nodaris.
 
-O cliente oficial aceita MCP via HTTP e header MCP estático em perfil; portanto existe uma rota técnica para preservar o Bearer do gateway. As permissões reais da conta/workspace e a compatibilidade operacional do perfil ainda não foram confirmadas. Não desative a autenticação do gateway nem crie túnel alternativo ou endpoint público.
+O cliente oficial aceita MCP via HTTP e header MCP estático em perfil; portanto existe uma rota técnica para preservar o Bearer do gateway. O perfil passou no doctor, mas a autenticação da runtime key perante a Platform não foi aceita. Não desative a autenticação do gateway nem crie túnel alternativo ou endpoint público.
 
 Referências oficiais consultadas: [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels), [tunnel-client v0.0.15](https://github.com/openai/tunnel-client/tree/v0.0.15) e [releases](https://github.com/openai/tunnel-client/releases).

@@ -140,15 +140,15 @@ const handler = createMcpHandler(createServerForRequest, { responseMode: "json" 
 const nodeHandler = toNodeHandler(handler);
 const http = createServer((req, res) => {
   if (!validHost(req, res) || !validOrigin(req, res)) return;
+  if (req.url !== "/mcp") {
+    res.writeHead(404, { "cache-control": "no-store" }).end();
+    return;
+  }
   const supplied = req.headers.authorization?.startsWith("Bearer ")
     ? Buffer.from(req.headers.authorization.slice(7))
     : Buffer.alloc(0);
   if (supplied.length !== token.length || !timingSafeEqual(supplied, token)) {
     res.writeHead(401, { "cache-control": "no-store" }).end();
-    return;
-  }
-  if (req.url !== "/mcp") {
-    res.writeHead(404).end();
     return;
   }
   req.method ??= "GET";

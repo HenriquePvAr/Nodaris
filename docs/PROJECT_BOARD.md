@@ -15,21 +15,30 @@ Conectar ChatGPT a projetos locais explicitamente autorizados por MCP privado, c
 - Leitura, busca, árvore, Git status/log/diff, concorrência, agente offline/reconexão e bloqueios de token/caminhos externos foram exercitados em fixtures.
 - Login GitHub refeito como `HenriquePvAr`; permissão ADMIN confirmada; helper Git configurado apenas localmente para este repositório.
 - Commits `61d23e3` e `7d3041f` enviados sem force; `origin/main` confirma `7d3041fdfa76e87206126026888800abf89f31fa`. Ambos atribuídos a Henrique, sem coautores.
-- `tunnel-client v0.0.15` oficial baixado para diretório temporário; checksum SHA-256 conferido com manifesto da release; `help quickstart` executado. Binário Windows sem Authenticode; não instalado persistentemente nem conectado.
+- `tunnel-client v0.0.15` instalado localmente em `%LOCALAPPDATA%\Nodaris\tunnel-client\v0.0.15`, checksum oficial conferido e licença/SPDX preservados. Perfil `nodaris-local` criado com o túnel existente, runtime key em arquivo protegido e Bearer Nodaris por referência de arquivo; `doctor --explain` passou após o gateway responder 404 em rotas sem MCP. A consulta read-only ao túnel retornou HTTP 401 e `run` encerrou antes de iniciar listener.
 - M01.2: agente/gateway executados em `127.0.0.1:3334/3333`, allowlist exclusiva Nodaris; o agente descobriu 1 projeto. Cliente MCP real listou 9 tools e validou health, machines, projects, árvore (41 entradas), busca, leitura de README, Git status/diff/log; `.env.local`, `.git/config` e caminho absoluto externo foram negados. `pnpm test` 9/9 e typecheck passaram.
-- Token Bearer de ensaio criado fora do repositório em `%LOCALAPPDATA%\Nodaris`, ACL restrita; sem impressão, log, argumento ou inclusão em Git.
-- `tunnel-client v0.0.15` instalado localmente em `%LOCALAPPDATA%\Nodaris\tunnel-client\v0.0.15`, com checksum oficial previamente conferido e licença/SPDX preservados. `help quickstart`, `help init` e `help doctor` consultados. Não foi iniciado contra a OpenAI.
-- Secure MCP Tunnel ainda aguarda configuração manual do usuário na OpenAI Platform: criar/confirmar túnel, `tunnel_id`, runtime key local, permissões e workspace. ChatGPT real **BLOCKED/PENDING**; não houve chamada real.
+- M01.3: Bearer Nodaris e runtime key mantidos fora do repositório, em arquivos locais com ACL Dell/SYSTEM; conteúdo de credenciais não foi impresso, incluído em argumentos ou salvo em logs.
+- Túnel e workspace foram criados pelo proprietário. Autenticação real da runtime key ainda não está confirmada; validar chave existente/organização antes de repetir `run`. ChatGPT real ainda não foi chamado.
 
 ## Frentes e estado
 
-| Frente                  | Estado                                                                   | Próxima ação                                                                |
-| ----------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
-| Fundação                | Implementada e validada em `main`; raiz Nodaris autorizada para M01.2    | Completar chamada real pelo cliente ChatGPT                                 |
-| Filesystem/Git          | 9 ferramentas chamadas no projeto real autorizado; segredos/traversal bloqueados | Revalidar pelo ChatGPT depois de configurar o túnel                         |
-| Integração MCP          | Gateway Streamable HTTP e agente separados; chamadas reais locais aprovadas | Configurar perfil, doctor e conexão ChatGPT após gate manual                 |
-| Secure MCP Tunnel       | Cliente oficial v0.0.15 instalado; sem perfil/credenciais OpenAI            | Usuário configurar túnel, permissões, workspace e runtime key                |
-| Integrações open source | Avaliadas; nenhuma ferramenta com escrita foi exposta                    | Serena M02, MetaMCP M03, conforme decisões documentadas                     |
+| Frente                  | Estado                                                                           | Próxima ação                                             |
+| ----------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| Fundação                | Implementada e validada em `main`; raiz Nodaris autorizada para M01.2            | Completar chamada real pelo cliente ChatGPT              |
+| Filesystem/Git          | 9 ferramentas chamadas no projeto real autorizado; segredos/traversal bloqueados | Revalidar pelo ChatGPT depois de configurar o túnel      |
+| Integração MCP          | Gateway Streamable HTTP; MCP real funciona e exige Bearer em `/mcp`              | Revalidar chamada após iniciar túnel                     |
+| Secure MCP Tunnel       | Perfil criado; doctor PASS; runtime key recebe HTTP 401 na API                   | Proprietário confirmar a chave/runtime/org já existentes |
+| Integrações open source | Avaliadas; nenhuma ferramenta com escrita foi exposta                            | Serena M02, MetaMCP M03, conforme decisões documentadas  |
+
+## Estados independentes M01.3
+
+| Estado                  | Resultado | Evidência/pendência                                                          |
+| ----------------------- | --------- | ---------------------------------------------------------------------------- |
+| LOCAL_MCP               | PASS      | Nove tools locais; README lido; token inválido negado; raiz única            |
+| TUNNEL_CONFIG           | PASS      | Perfil `nodaris-local`; `doctor --explain` passou                            |
+| TUNNEL_RUNTIME          | BLOCKED   | Consulta `admin tunnels get` com runtime key retornou HTTP 401; sem listener |
+| CHATGPT_PLUGIN          | PENDING   | Criar/instalar manualmente após o túnel ficar pronto                         |
+| CHATGPT_REAL_CONNECTION | PENDING   | Nenhuma chamada real pelo ChatGPT                                            |
 
 ## Limitações conhecidas
 
@@ -41,8 +50,8 @@ Conectar ChatGPT a projetos locais explicitamente autorizados por MCP privado, c
 
 ## Próximos passos
 
-1. Usuário criar/confirmar o túnel na Platform e verificar `Tunnels Read + Use`, organização e workspace pessoais; fornecer apenas o `tunnel_id` e manter a runtime key local.
-2. Criar perfil, executar `tunnel-client doctor --explain`, validar health/ready e preparar o connector no ChatGPT; parar se a checagem exigir metadata OAuth/PRMD que a arquitetura ainda não oferece.
-3. Usuário criar/instalar o connector e executar consulta real; exigir `nodaris_projects_list` e `nodaris_file_read` para liberar PASS ponta a ponta.
+1. Proprietário confirmar que a runtime key existente está ativa, tem Tunnels Read + Use e pertence à mesma organização do túnel; atualizar o arquivo local sem compartilhar o segredo.
+2. Repetir `admin tunnels get`; após resposta autorizada, iniciar o daemon e confirmar `/healthz`, `/readyz` e `/ui`.
+3. Proprietário criar/instalar o connector e executar consultas reais; exigir `nodaris_projects_list` e `nodaris_file_read` para liberar PASS ponta a ponta.
 4. Atualizar a apresentação do quadro estático somente após aprovação específica do autor, preservando o HTML e IDs existentes.
 5. M02: avaliar Serena isolada somente leitura, mantendo revisão da licença GPL-3.0-or-later.

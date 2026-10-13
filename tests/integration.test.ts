@@ -196,6 +196,11 @@ describe("MCP local entre processos", () => {
       body: "{}"
     });
     expect(gatewayResponse.status).toBe(401);
+
+    const discoveryResponse = await fetch(
+      `http://127.0.0.1:${gatewayPort}/.well-known/oauth-protected-resource/mcp`
+    );
+    expect(discoveryResponse.status).toBe(404);
   });
 
   it("limita chamadas simultâneas e se recupera após o agente voltar", async () => {
