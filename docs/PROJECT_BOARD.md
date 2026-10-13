@@ -24,16 +24,20 @@ Conectar ChatGPT a projetos locais explicitamente autorizados por MCP privado, c
 
 ## Frentes e estado
 
-### M01.10 — Validação de recuperação (B1.2 concluída)
+### M01.10 — Validação de recuperação (B1.2 e B2 concluídas)
 
-- `LIVE_RUNTIME`: PASS — após a transição controlada, supervisor PID 9376, agente 7036, gateway 12508 e tunnel-client 11312 estavam ativos, sem duplicatas. Portas 3334/3333/8080 estavam em loopback e correspondiam aos serviços esperados. Estado e `startup-events.jsonl` atualizados; ACL restrita à conta atual + SYSTEM. Não foi iniciado outro ciclo após a revalidação.
-- `LIFECYCLE_AUDIT`: FIXED_AND_OBSERVED — startup e recuperação consomem retries/backoff antes de abrir circuito; parada percorre os componentes; backoff respeita pedido de stop. `restart` exige parada confirmada. Agente/gateway rodam diretamente via Node `--import tsx`; a parada supervisionada e a inicialização corrigida foram comprovadas na B1.2.
-- `TEST_COVERAGE`: PASS — fixtures isoladas para parada ordenada, stop com falha parcial, startup/reinício, falha de health/porta e retry, backoff completo/cancelado, circuit breaker, mutex entre processos, estado/log sanitizados e rejeição de componente fora do escopo. Nenhum processo Nodaris real foi afetado.
-- `B1_STOP_RECOVERY`: PASS — uma única parada oficial foi confirmada em 9,15 s; supervisor e descendentes terminaram, sem órfãos, estado `stopped` e portas liberadas.
-- `B1_START_RECOVERY`: PASS — uma única inicialização oficial da versão instrumentada; health autenticado, componentes saudáveis e `tunnel_chatgpt_readiness=READY` em 47,52 s a partir da solicitação de início.
-- `CHATGPT_REVALIDATION`: PASS — o proprietário confirmou chamadas reais pelo ChatGPT a `nodaris_health`, `nodaris_projects_list`, `nodaris_file_read` (README.md) e `nodaris_git_status`. O Git informou `main` sincronizada com `origin/main`; somente `docs/status/` permanece não rastreado.
-- `PHASE_B2`: PENDING_OWNER_AUTHORIZATION — novo restart e recuperação após falha controlada de processo aguardam autorização específica. Não iniciar outro ciclo nesta etapa.
-- `TESTS`: PASS — 14/14 testes, typecheck, lint, formato, parser PowerShell e validação da importação `node --import tsx` passaram.
+- `LIVE_RUNTIME`: PASS — estado final observado com supervisor PID 2388, agente 9136, gateway 16284 e tunnel-client 13516; uma instância por componente, árvore de filhos correta e listeners 3334/3333/8080 em `127.0.0.1` pertencentes aos processos esperados. Todos saudáveis e readiness `READY`.
+- `LIFECYCLE_AUDIT`: FIXED_AND_OBSERVED — `restart` oficial confirmou a parada antes da inicialização; saída de processo de cada componente acionou retry/backoff e recuperação saudável. Agente/gateway rodam via Node `--import tsx`.
+- `B1_STOP_RECOVERY`: PASS — parada oficial confirmada em 9,15 s; supervisor e descendentes encerrados, sem órfãos e portas liberadas.
+- `B1_START_RECOVERY`: PASS — inicialização corrigida; readiness `READY` em 47,52 s.
+- `B2_RESTART_RECOVERY`: PASS — uma chamada oficial; PIDs antigos encerrados e listeners liberados antes do novo supervisor. A nova readiness foi observada em cerca de 40 s após o início do supervisor.
+- `B2_DUPLICATE_PROTECTION`: PASS — uma chamada oficial `start` retornou “Supervisor Nodaris já está em execução”; PIDs, quantidade de processos e listeners permaneceram iguais.
+- `B2_PROCESS_FAILURE_RECOVERY`: PASS — agente, gateway e tunnel-client encerrados individualmente após validação do PID; todos recuperados automaticamente em primeira tentativa, sem circuit breaker.
+- `B2_BACKOFF`: PASS — os três retries registraram e cumpriram backoff de 5 s.
+- `B2_TELEMETRY`: PASS — JSONL registrou detecção de saída, backoff agendado/concluído, processo iniciado, health e readiness. Sem conteúdo sensível.
+- `CHATGPT_REVALIDATION`: PASS — proprietário confirmou 4/4 chamadas reais após B2: health, lista de projetos, leitura do README e Git status, todas na primeira tentativa. `main` sincronizada com `origin/main`; somente `docs/status/` não rastreado.
+- `TESTS`: PASS — 14/14 testes, typecheck, lint, formatação, parse PowerShell e `git diff --check` passaram nesta consolidação.
+- `M01.11_NETWORK_RECONNECT`: PLANNED — plano preparado em `STABILITY_TESTS.md`; depende de autorização específica para desconectar/restaurar a rede. Nenhuma desconexão foi feita.
 
 ### M01.9 — Diagnóstico e observabilidade (13/10/2026)
 
@@ -67,14 +71,14 @@ Conectar ChatGPT a projetos locais explicitamente autorizados por MCP privado, c
 
 | Frente                  | Estado                                                                              | Próxima ação                                            |
 | ----------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| Fundação                | MVP local e raiz única validados; conexão real ChatGPT confirmada pelo proprietário | Executar testes de estabilidade                         |
-| Filesystem/Git          | Sete ferramentas reais chamadas; leitura e busca retornaram dados locais            | Repetir após reinício e queda/restauração de rede       |
+| Fundação                | MVP local e raiz única validados; conexão real ChatGPT confirmada pelo proprietário | Executar M01.11 após autorização para teste de rede     |
+| Filesystem/Git          | Sete ferramentas reais chamadas; leitura e busca retornaram dados locais            | Revalidar após o teste M01.11 autorizado                |
 | Integração MCP          | Gateway Streamable HTTP; bearer obrigatório; ferramentas só leitura                 | Manter confirmação de isolamento                        |
-| Secure MCP Tunnel       | Runtime key autenticada; processo ativo; plano de controle `ok/polling`             | Testar reconexão após indisponibilidade de rede         |
+| Secure MCP Tunnel       | Runtime key autenticada; recuperação de processo validada; `ok/polling`             | Medir reconexão após indisponibilidade de rede          |
 | Integrações open source | Avaliadas; nenhuma ferramenta com escrita foi exposta                               | Serena M02, MetaMCP M03, conforme decisões documentadas |
 | Nodaris Teams           | Ideia futura, sem implementação                                                     | Avaliar somente após estabilização local                |
 
-## Estados independentes M01.5
+## Estados independentes M01.5 (histórico)
 
 | Estado                  | Resultado | Evidência/pendência                                                                           |
 | ----------------------- | --------- | --------------------------------------------------------------------------------------------- |
@@ -98,6 +102,6 @@ Conectar ChatGPT a projetos locais explicitamente autorizados por MCP privado, c
 ## Próximos passos
 
 1. Proprietário remover manualmente a cópia TXT temporária da runtime key em Downloads.
-2. Executar os cenários pendentes de reinício e recuperação de internet em [STABILITY_TESTS.md](guides/STABILITY_TESTS.md), sem marcar PASS antecipadamente.
-3. Manter a raiz exclusiva autorizada e repetir as chamadas ChatGPT após cada cenário.
-4. Não iniciar M02 antes de fechar a estabilidade M01.5.
+2. Executar o teste de reconexão de internet da M01.11 somente após autorização específica; plano em [STABILITY_TESTS.md](guides/STABILITY_TESTS.md).
+3. Manter a raiz exclusiva autorizada e repetir as chamadas ChatGPT após o cenário de rede.
+4. Não iniciar M02 antes de concluir a estabilidade local M01.

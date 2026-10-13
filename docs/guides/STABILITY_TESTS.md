@@ -1,10 +1,10 @@
 # Plano de testes de estabilidade M01.9
 
-Atualizado em 13/10/2026. A conexão real pelo ChatGPT e a inicialização silenciosa após novo logon foram confirmadas pelo proprietário. A queda/restauração da internet e a recuperação após encerramento inesperado de serviços continuam pendentes.
+Atualizado em 13/10/2026. A conexão real pelo ChatGPT, inicialização silenciosa, restart supervisionado e recuperação individual dos três componentes foram confirmados. A queda/restauração da internet continua pendente de autorização específica.
 
-## M01.10 — recuperação controlada (B1.2 concluída)
+## M01.10 — recuperação controlada (B1.2 e B2 concluídas)
 
-**Estado: B1.2 concluída; Fase B2 aguarda autorização específica.** A inspeção anterior da Fase A está registrada abaixo como histórico. Nesta janela, foi executada uma única parada supervisionada e, após comprovação do encerramento, uma única inicialização oficial da versão corrigida. Nenhum restart adicional, falha provocada, reinício do Windows ou interrupção de rede foi executado.
+**Estado: B1.2 e B2 concluídas; M01.11 aguarda autorização para teste de rede.** A inspeção da Fase A e o plano inicial da B2 são preservados como histórico; as evidências reais das duas etapas estão registradas abaixo. Nenhum reinício do Windows ou interrupção de rede foi executado.
 
 ### Evidência da transição B1.2 — 13/10/2026
 
@@ -15,7 +15,20 @@ Atualizado em 13/10/2026. A conexão real pelo ChatGPT e a inicialização silen
 - Após a transição, o proprietário confirmou quatro chamadas reais do ChatGPT pelo Nodaris MCP: `nodaris_health` (ok, 1 projeto), `nodaris_projects_list` (Nodaris localizado), `nodaris_file_read` (`README.md`) e `nodaris_git_status` (`main` sincronizada com `origin/main`; somente `docs/status/` não rastreado). Essa confirmação fecha a validação ponta a ponta da B1.2; não é inferida apenas de health local ou polling.
 - O snapshot de PIDs/readiness acima é evidência da janela B1.2; não foi feita nova leitura nem ciclo de processos após a revalidação informada pelo proprietário. `docs/status/` foi preservado sem alteração.
 
-**Resultados B1.2:** `STOP_RECOVERY=PASS`; `START_RECOVERY=PASS`; `TUNNEL_READINESS=PASS`; `CHATGPT_REVALIDATION=PASS` (quatro chamadas reais confirmadas pelo proprietário). **Fase B2:** `PENDING_OWNER_AUTHORIZATION` para restart e recuperação após falha controlada. Não iniciar esses testes sem autorização específica.
+**Resultados B1.2:** `STOP_RECOVERY=PASS`; `START_RECOVERY=PASS`; `TUNNEL_READINESS=PASS`; `CHATGPT_REVALIDATION=PASS` (quatro chamadas reais confirmadas pelo proprietário).
+
+### Evidência da Fase B2 — 13/10/2026
+
+- **Pré-validação:** supervisor PID 9376; agente 7036; gateway 12508; tunnel-client 11312. Executáveis, horários de criação e relações pai-filho corresponderam à árvore Nodaris; portas 3333/3334/8080 pertenciam aos serviços em loopback. Health autenticada passou, `tunnel_chatgpt_readiness=READY`, estado e JSONL foram lidos sem expor argumentos ou segredos. Tarefa `Nodaris User Session` estava ativa em contexto do usuário, `Limited` e `IgnoreNew`.
+- **Restart oficial:** executado uma vez. O shutdown começou às 16:43:15.511; às 16:43:19.317 o estado estava `stopped`, os quatro PIDs anteriores tinham terminado e não havia listeners. O novo supervisor PID 2388 iniciou às 16:43:23.582, seguido pelo agente 9776, gateway 22148 e túnel 1564. Health de todos passou e `poll_current`/READY foi registrado às 16:44:03.513, cerca de 40 s após o início do supervisor. Nenhum órfão ou duplicata foi encontrado.
+- **Proteção contra duplicatas:** com o sistema saudável, uma chamada oficial `nodaris.ps1 start` respondeu “Supervisor Nodaris já está em execução”. Supervisor, PIDs, relações pai-filho, contagens e proprietários dos listeners permaneceram iguais.
+- **Falha do agente:** PID 9776 (Node, entrypoint do agente, filho do supervisor 2388 e proprietário de 3334) foi encerrado individualmente às 16:45:17.799. A saída foi detectada; backoff de 5 s cumprido; health passou às 16:45:26.152 e o novo PID foi 9136. Tempo do encerramento até health: 8,35 s; retries finais: 1.
+- **Falha do gateway:** PID 22148 (Node, entrypoint do gateway, filho do supervisor e proprietário de 3333) foi encerrado individualmente às 16:45:57.234. A saída foi detectada; backoff de 5 s cumprido; health passou às 16:46:08.300 e o novo PID foi 16284. Tempo até health: 11,07 s; retries finais: 1.
+- **Falha do tunnel-client:** PID 1564 (versão fixada v0.0.15, filho do supervisor e proprietário de 8080) foi encerrado individualmente às 16:46:30.032. A health local voltou às 16:46:41.247 no PID 13516, após backoff de 5 s. O readiness aguardou o próximo polling e retornou a `READY` às 16:47:14.800; total de 44,77 s desde o encerramento até readiness. A indisponibilidade temporária do túnel foi observada e recuperada sem restart manual.
+- **Estado final:** supervisor 2388 com três filhos válidos: agente 9136, gateway 16284 e tunnel-client 13516. Uma instância de cada processo, sem PIDs antigos, sem órfãos, listeners correspondentes em `127.0.0.1`, health autenticada e `tunnel_chatgpt_readiness=READY`. Contadores de recuperação: 1 por componente. Nenhum circuito abriu.
+- O proprietário confirmou depois **4/4 chamadas reais pelo ChatGPT**, todas na primeira tentativa: `nodaris_health` (ok, 1 projeto), `nodaris_projects_list`, `nodaris_file_read` (`README.md`) e `nodaris_git_status` (`main` sincronizada com `origin/main`; somente `docs/status/` não rastreado). Esta confirmação é separada das verificações locais de health/readiness.
+
+**Resultados B2:** `RESTART_RECOVERY=PASS`; `DUPLICATE_PROTECTION=PASS`; `PROCESS_FAILURE_RECOVERY=PASS` (agente, gateway e túnel); `BACKOFF=PASS` (5 s em cada retry); `TELEMETRY=PASS`; `CHATGPT_REVALIDATION=PASS` (4/4). Não foi testada desconexão de internet nem reinício do Windows nesta fase.
 
 ### Histórico da inspeção da Fase A
 
@@ -23,31 +36,17 @@ A consulta local anterior confirmou a tarefa `Nodaris User Session` habilitada e
 
 **Falhas de implementação corrigidas na Fase A:** a recuperação de filho abria o circuito após uma única tentativa malsucedida, embora a política anunciasse até cinco retries. Agora o helper percorre tentativas, registra cada backoff e só abre o circuito ao atingir o limite. O comando `restart` também aguardava apenas dois segundos após `stop`; agora exige estado terminal confirmado em até 30 segundos e cancela o reinício se não houver confirmação. A parada final do supervisor usa uma única função que mantém a ordem tunnel-client → gateway → agente.
 
-O harness PowerShell isolado cobre parada em ordem e continuação após falha parcial, falha de porta/health e recuperação, sequência de reinício, backoff 5/15/30/60/120 e cancelamento durante backoff, circuito aberto, mutex verificado por outro processo PowerShell, integridade do log sanitizado e rejeição de componentes fora do escopo. O comando `node --import tsx` foi validado sem iniciar serviços. Os fixtures não exercitam uma árvore de servidor real nem provam recuperação após falha inesperada; a parada supervisionada real e a inicialização corrigida foram comprovadas na B1.2, enquanto restart e falha provocada seguem pendentes da Fase B2.
+O harness PowerShell isolado cobre parada em ordem e continuação após falha parcial, falha de porta/health e recuperação, sequência de reinício, backoff 5/15/30/60/120 e cancelamento durante backoff, circuito aberto, mutex verificado por outro processo PowerShell, integridade do log sanitizado e rejeição de componentes fora do escopo. O comando `node --import tsx` foi validado sem iniciar serviços. Os fixtures não exercitam uma árvore de servidor real; a parada/inicialização supervisionadas foram comprovadas na B1.2, e restart, proteção contra duplicatas e recuperação provocada por componente foram comprovadas na B2.
 
-`tunnel_chatgpt_readiness=READY` confirma polling recente do cliente ao control plane, mas isoladamente não demonstra chamada MCP ponta a ponta. Na B1.2, essa lacuna foi fechada pelas quatro chamadas reais confirmadas pelo proprietário após a transição.
+`tunnel_chatgpt_readiness=READY` comprova polling recente do cliente ao control plane, mas não substitui chamada MCP ponta a ponta. Na M01.10, readiness local e quatro chamadas reais do ChatGPT foram verificadas separadamente.
 
-### Gate da Fase B2
+### M01.11 — reconexão de internet (planejada; não executada)
 
-O próximo ensaio afetará os serviços atuais; seus PIDs precisam ser validados novamente no início de uma janela autorizada. A B1.2 não autoriza novo restart, encerramento controlado de processos, reinício do Windows ou teste de rede.
+Objetivo: observar o comportamento do tunnel-client v0.0.15 e do supervisor durante uma interrupção temporária de conectividade e após a restauração, sem reiniciar o Nodaris.
 
-Sequência proposta para B2, sujeita a autorização específica: (1) capturar status, saúde, PIDs, readiness e fim do JSONL; (2) executar um restart oficial e confirmar término dos PIDs antigos antes dos novos; (3) em autorização separada ou incluída expressamente, encerrar um PID filho validado por PID e relação com o supervisor, observando evento, backoff e readiness; (4) confirmar status e solicitar revalidação real pelo ChatGPT. A B1.2 já validou a parada e inicialização controladas, portanto não repetir esse ciclo como parte do registro atual.
+Plano proposto para uma janela autorizada: (1) registrar status, PIDs/árvore, listeners loopback, health/readiness e fim do JSONL; (2) proprietário desconectar a internet por até 60 s, sem alterar firewall; (3) acompanhar health local e eventos de polling, distinguindo perda do control plane de falha local; (4) proprietário restaurar a conexão; (5) observar a volta a `READY` por até 5 min, sem reiniciar processos; (6) confirmar health, lista de projetos, leitura do README e Git status pelo ChatGPT e registrar tempos.
 
-#### Plano de medição B2 (não executado)
-
-- **Snapshot antes/depois de cada cenário:** timestamp UTC e local; saída sanitizada de `nodaris.ps1 status`; `state.json`; PIDs, executáveis, horários de criação e relações pai-filho; proprietários/listeners em 3333, 3334 e 8080; estado da tarefa; readiness; posição/tamanho e últimas linhas sanitizadas do JSONL. Não registrar argumentos/ambiente com segredos nem conteúdo de arquivos.
-- **`RESTART_RECOVERY`:** após validar identidade de todos os processos atuais, executar uma vez `nodaris.ps1 restart`. Limites: stop confirmado em até 30 s; observar inicialização por até 25 min, cobrindo o pior caso documentado de aproximadamente 23min30s para seis tentativas. Confirmar ausência dos PIDs antigos e órfãos antes de aceitar novos PIDs; exigir uma instância por componente, listeners apenas em loopback, health autenticada e `tunnel_chatgpt_readiness=READY`.
-- **`PROCESS_FAILURE_RECOVERY`:** um componente por vez, com janela e autorização expressa. Antes de provocar falha, validar PID, caminho executável, horário de criação, pai supervisor, papel do processo e listener quando aplicável. Encerrar somente o PID exato do filho autorizado; nunca usar nome genérico. Aguardar recuperação e health antes do próximo componente.
-- **`DUPLICATE_PROTECTION`:** com os serviços saudáveis e snapshot inicial registrado, chamar uma vez `nodaris.ps1 start`. O resultado esperado é “Supervisor Nodaris já está em execução”, sem PID novo; comparar supervisor/mutex, processos por identidade, PIDs em `state.json` e listeners antes/depois. A tarefa mantém `IgnoreNew`. Interromper diante de PID inesperado, segunda instância, listener sem correspondência ou estado divergente; não iniciar outro supervisor manualmente.
-- **`BACKOFF` e `TELEMETRY`:** comparar timestamps dos eventos `recovery/failed`, `recovery/backoff`, `recovery/started`, `health` e `readiness` com a política de até cinco retries e atrasos 5/15/30/60/120 s. Em circuito aberto, interromper e não insistir; preservar eventos e coletar diagnóstico sanitizado.
-- **Limites e critérios de interrupção:** stop >30 s, timeout de health por tentativa (45 s agente/túnel; 30 s gateway), readiness não alcançada em 25 min no restart, ou recuperação individual sem health após o limite de retries/backoff (até cerca de 10 min). Interromper também em circuito aberto, erro de autenticação, porta não liberada, processo órfão, duplicidade, PID reutilizado/divergente, bind fora de loopback ou evento/log inconsistente. Ao interromper, não repetir stop nem matar outros processos; recolher snapshot e decidir a recuperação com o proprietário.
-- **Recuperação e fechamento:** usar somente o mecanismo oficial `nodaris.ps1 status|start|stop|restart`; `start` apenas após comprovar ausência do supervisor anterior, ausência de listeners e ausência de órfãos. Não executar start automático após falha de restart. Depois de cada cenário, confirmar health/readiness, revisar telemetria sanitizada e solicitar ao proprietário as chamadas MCP reais (`health`, projetos, leitura README e Git status). Registrar resultado independentemente por cenário.
-
-Referência histórica de indisponibilidade: aproximadamente 2–4 minutos para stop/start ou restart saudável, baseada na amostra M01.8 de 2min43s até o agente, sem causa comprovada. Na B1.2, a parada confirmou em 9,15 s e o readiness do túnel foi observado 47,52 s após a solicitação de início. Recuperação de falha individual acrescenta o backoff corrente (agente 15s pela contagem atual; gateway e túnel 5s) e até 45s de health. O pior caso de startup, com seis tentativas e todos os timeouts/backoffs no limite, é aproximadamente 23min30s. A parada controlada tem limite de confirmação de 30 segundos; em timeout, `restart` cancela e não lança uma segunda instância.
-
-Recuperação manual: consultar `scripts/windows/nodaris.ps1 status`; se o stop/restart não confirmar, não abrir outro supervisor nem encerrar processo por nome. Registrar a saída sanitizada e pedir orientação antes de qualquer intervenção fora do procedimento. Critérios de interrupção: timeout de parada, porta ainda ocupada, PID inesperado, evento `circuit_open`, readiness perdida ou comportamento diferente do processo autorizado.
-
-**Resultados:** parada/inicialização e revalidação ChatGPT da B1.2 estão PASS com evidências reais acima. `RESTART_RECOVERY=PENDING_OWNER_AUTHORIZATION`; `PROCESS_FAILURE_RECOVERY=PENDING_OWNER_AUTHORIZATION`. Fixtures não substituem os ensaios reais pendentes.
+Interromper a observação se algum processo Nodaris terminar, o agente/gateway perderem health, surgir listener externo, PID duplicado/desconhecido ou circuito aberto. Não executar stop/start/restart como parte do teste de rede. Se readiness não voltar em 5 min, encerrar a janela de observação e apresentar diagnóstico antes de qualquer ação de recuperação. A desconexão física/da interface e a restauração dependem de autorização expressa do proprietário e ainda não foram realizadas.
 
 ## Estado antes dos testes
 
@@ -59,11 +58,11 @@ Recuperação manual: consultar `scripts/windows/nodaris.ps1 status`; se o stop/
 
 ## Tarefa de logon e supervisor
 
-**Estado: inicialização automática silenciosa confirmada; testes de interrupção pendentes.** Os scripts em `scripts/windows/` criam tarefa no logon interativo do usuário atual, nível `Limited`, sem `SYSTEM`. A definição não contém segredos. A inicialização é sequencial: agente (health autenticado), gateway (listener de loopback), tunnel-client (perfil fixado). Uma única instância é solicitada pelo Agendador e mutex local; conflito de porta interrompe a tentativa em vez de abrir outro listener.
+**Estado: inicialização automática silenciosa e recuperação supervisionada confirmadas; reconexão de internet pendente.** Os scripts em `scripts/windows/` criam tarefa no logon interativo do usuário atual, nível `Limited`, sem `SYSTEM`. A definição não contém segredos. A inicialização é sequencial: agente (health autenticado), gateway (listener de loopback), tunnel-client (perfil fixado). Uma única instância é solicitada pelo Agendador e mutex local; conflito de porta interrompe a tentativa em vez de abrir outro listener.
 
 Use `scripts/windows/nodaris.ps1 install|start|stop|restart|status|enable|disable|uninstall`. A instalação não inicia nem encerra processos ativos. O supervisor observa somente a saída dos próprios processos, usa backoff 5/15/30/60/120 segundos e abre circuito após cinco tentativas. Ele não reinicia tunnel-client por perda de internet: o cliente v0.0.15 documenta polling com retry/backoff de erros de transporte ([código/documentação oficial](https://github.com/openai/tunnel-client/blob/v0.0.15/pkg/controlplane/doc.go)); health/readiness precisam ser observados após a restauração. Essa capacidade documentada ainda não substitui o teste real de queda/restauração.
 
-Os processos Nodaris/tunnel-client estavam ativos na revisão, então validar `stop`/`restart` depende de janela aprovada pelo proprietário. Não executar esses comandos até obter autorização específica para interromper os processos ativos.
+As operações reais `stop`, `restart`, proteção contra duplicatas e recuperação de cada processo foram validadas na M01.10 B1.2/B2, com autorização específica e sem force-kill por nome. A desconexão/restauração de internet segue pendente de autorização própria.
 
 ## Smoke checks M01.7 — 13/10/2026
 
