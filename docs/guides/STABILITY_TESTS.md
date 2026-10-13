@@ -1,4 +1,4 @@
-# Plano de testes de estabilidade M01.8
+# Plano de testes de estabilidade M01.9
 
 Atualizado em 13/10/2026. A conexão real pelo ChatGPT e a inicialização silenciosa após novo logon foram confirmadas pelo proprietário. A queda/restauração da internet e a recuperação após encerramento inesperado de serviços continuam pendentes.
 
@@ -29,7 +29,7 @@ Os processos Nodaris/tunnel-client estavam ativos na revisão, então validar `s
 
 ## Cenário A — reinício do Windows
 
-**Status: PARCIAL.** Em 13/10/2026, o proprietário confirmou chamadas ChatGPT locais após reinício (`health`, lista de projetos, leitura de README e Git status). A tarefa estava `Running`; seu último resultado era `0x41301`, que indica execução em andamento. Os PIDs dos três serviços tinham como ancestral o PowerShell iniciado por `svchost.exe` do Agendador. A tarefa executou realmente, mas deixou uma janela visível. Após instalar o launcher invisível, falta novo logon para confirmar ausência da janela.
+**Status: PASS para início automático e chamadas ChatGPT; diagnóstico histórico limitado.** Em 13/10/2026, o proprietário confirmou novo logon sem janela e chamadas locais após o reinício. `LastRunTime` foi 15:17:17, `LastTaskResult=0`, supervisor iniciado às 15:17:45 e os processos descendiam do supervisor. A amostra M01.8 registrou o agente 2min43s após o supervisor, com `restartCount=1`. Os logs detalhados do Agendador estavam desabilitados e o estado do supervisor só retinha o snapshot mais recente, portanto a causa não pode ser determinada retroativamente. A telemetria M01.9 ficará disponível no próximo logon, que não será iniciado automaticamente.
 
 1. Agendar um período em que o proprietário possa interromper a sessão; salvar os demais trabalhos e confirmar que consegue acessar os segredos locais sem mostrá-los.
 2. Antes do reinício, registrar a hora e confirmar `/healthz`, `/readyz` e `/health?details=true` em loopback. Não guardar corpos que possam conter dados além dos campos de estado necessários.
@@ -38,7 +38,7 @@ Os processos Nodaris/tunnel-client estavam ativos na revisão, então validar `s
 5. Se a tarefa não iniciar a pilha, use o comando de status e anote o erro sem coletar conteúdo de segredo; não amplie allowlist nem desative Bearer.
 6. Confirmar `/healthz` e `/readyz` em HTTP 200 e `control-plane: ok/polling` no endpoint local de detalhes.
 7. Repetir pelo ChatGPT `nodaris_health`, `nodaris_projects_list`, `nodaris_project_tree`, `nodaris_file_read` (`README.md`), `nodaris_code_search`, `nodaris_git_status` e `nodaris_git_log`. Confirmar que a lista continua limitada a Nodaris.
-8. Registrar hora, resultados por etapa e qualquer inicialização manual necessária. O proprietário confirmou conectividade após restart e ausência de console no novo logon; ainda falta observar perda/restauração de internet.
+8. Registrar hora, resultados por etapa e qualquer inicialização manual necessária. O proprietário confirmou conectividade após restart e ausência de console no novo logon; a instrumentação agora prepara a captura detalhada no próximo logon.
 
 ## Cenário C — launcher invisível e readiness do túnel
 
@@ -61,6 +61,12 @@ Latências derivadas: 28s entre o horário registrado da tarefa e início do sup
 
 `/readyz` HTTP 200 representa health local do tunnel-client e não prova polling ao plano de controle. Antes de usar o plugin, execute `scripts/windows/nodaris.ps1 status` e aguarde `tunnel_chatgpt_readiness=READY`, que requer `ok/polling` e último sucesso recente, calculado pela janela de espera efetiva + deadline publicada pelo cliente. Após isso, faça uma chamada de health e reteste qualquer chamada que falhar. Essa prontidão não prova que o transporte MCP foi totalmente observado pelo endpoint local: a telemetria registrou `mcp=unknown` por ausência de evidência do transporte, mesmo com chamadas reais confirmadas pelo ChatGPT.
 
+## Observabilidade M01.9
+
+Os eventos são gravados em `%LOCALAPPDATA%\Nodaris\supervisor\startup-events.jsonl`, mais três arquivos rotacionados, limitados a 256 KiB cada. ACL protegida: usuário atual e SYSTEM. O JSONL registra timestamp UTC, duração, componente, estágio, tentativa, timeout, backoff, status e motivo enumerado. Mensagens de exceção, linhas de comando, PIDs, credenciais e conteúdo de projeto são excluídos.
+
+O fixture Windows `tests/fixtures/windows/diagnostics-smoke.ps1` cobre tentativa falha, backoff agendado, saúde do túnel pendente/pronto/obsoleto, rejeição de motivos livres, sanitização do schema, rotação e ACL. Isso não inicia agente/gateway/túnel reais. Para coletar a causa dos 2min43s, aguardar a próxima inicialização natural e analisar transições `process`, `health`, `backoff` e `readiness`; não reiniciar o PC, serviço ou rede para gerar a amostra.
+
 ## Cenário B — perda e restauração de internet
 
 **Status: PENDING / NÃO EXECUTADO.**
@@ -75,10 +81,10 @@ Latências derivadas: 28s entre o horário registrado da tarefa e início do sup
 
 ## Registro de resultado
 
-| Cenário                         | Estado atual                                     | Evidência necessária para PASS                                                                           |
-| ------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| Conexão real ChatGPT            | PASS, confirmada pelo proprietário em 13/10/2026 | Sete ferramentas; leitura de README e busca com dados locais; projeto Nodaris exclusivo                  |
-| Reinício do Windows             | PENDING                                          | Observações antes/depois do reinício, início manual ou automático identificado, chamadas reais repetidas |
-| Queda e restauração de internet | PENDING                                          | Estado do polling durante/depois, tempo até recuperação e chamadas reais após a restauração              |
+| Cenário                         | Estado atual                                     | Evidência necessária para PASS                                                                                                               |
+| ------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Conexão real ChatGPT            | PASS, confirmada pelo proprietário em 13/10/2026 | Sete ferramentas; leitura de README e busca com dados locais; projeto Nodaris exclusivo                                                      |
+| Reinício do Windows             | PASS                                             | Proprietário confirmou tarefa automática silenciosa e consultas locais pelo ChatGPT; latência fina pendente da próxima amostra instrumentada |
+| Queda e restauração de internet | PENDING                                          | Estado do polling durante/depois, tempo até recuperação e chamadas reais após a restauração                                                  |
 
 Não alterar o dashboard `docs/status/` durante esses ensaios sem aprovação específica; atualizar este registro e `docs/PROJECT_BOARD.md` com resultados observados.

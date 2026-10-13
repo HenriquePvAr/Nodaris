@@ -1,0 +1,15 @@
+{
+  "live": true,
+  "ready": true,
+  "components": {
+    "control-plane": {
+      "status": "starting",
+      "state": "waiting",
+      "details": {
+        "last_success": null,
+        "effective_wait_seconds": 30,
+        "deadline_seconds": 35
+      }
+    }
+  }
+}

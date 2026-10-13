@@ -12,9 +12,11 @@ $taskName = 'Nodaris User Session'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $supervisor = Join-Path $PSScriptRoot 'supervisor.ps1'
 $launcher = Join-Path $PSScriptRoot 'launcher.vbs'
+$diagnosticsScript = Join-Path $PSScriptRoot 'diagnostics.ps1'
 $stateRoot = Join-Path $env:LOCALAPPDATA 'Nodaris\supervisor'
 $stateFile = Join-Path $stateRoot 'state.json'
 $stopFile = Join-Path $stateRoot 'stop.request'
+. $diagnosticsScript
 
 function Get-NodarisTask {
   Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
@@ -33,26 +35,6 @@ function Get-LocalPortState([int]$Port) {
     $client.EndConnect($pending)
     return $true
   } catch { return $false } finally { $client.Dispose() }
-}
-
-function Test-TunnelControlPlaneReadiness($Health) {
-  $controlPlane = $Health.components.'control-plane'
-  if ($null -eq $controlPlane -or $controlPlane.status -ne 'ok' -or $controlPlane.state -ne 'polling') { return $false }
-  if ($null -eq $controlPlane.details.last_success) { return $false }
-  try {
-    $lastSuccessValue = $controlPlane.details.last_success
-    if ($lastSuccessValue -is [DateTimeOffset]) {
-      $lastSuccess = $lastSuccessValue.ToUniversalTime()
-    } elseif ($lastSuccessValue -is [DateTime]) {
-      $lastSuccess = [DateTimeOffset]::new($lastSuccessValue.ToUniversalTime())
-    } else {
-      $lastSuccess = [DateTimeOffset]::Parse([string]$lastSuccessValue, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
-    }
-    $pollWindow = [int]$controlPlane.details.effective_wait_seconds + [int]$controlPlane.details.deadline_seconds
-    if ($pollWindow -le 0) { return $false }
-    $ageSeconds = [Math]::Max(0, ([DateTimeOffset]::UtcNow - $lastSuccess).TotalSeconds)
-    return $ageSeconds -le $pollWindow
-  } catch { return $false }
 }
 
 function Show-Status {
@@ -81,7 +63,10 @@ function Show-Status {
       'tunnel_chatgpt_readiness=WAITING'
     } else {
       'tunnel_control_plane={0}/{1}' -f $controlPlane.status,$controlPlane.state
-      'tunnel_chatgpt_readiness=' + $(if (Test-TunnelControlPlaneReadiness $health) { 'READY' } else { 'WAITING_FOR_RECENT_POLL' })
+      $reasonCode = ''
+      $tunnelReady = Test-NodarisTunnelReadiness $health ([ref]$reasonCode)
+      'tunnel_chatgpt_readiness=' + $(if ($tunnelReady) { 'READY' } else { 'WAITING_FOR_RECENT_POLL' })
+      'tunnel_readiness_reason=' + $reasonCode
     }
   } catch {
     'tunnel_control_plane=UNAVAILABLE'

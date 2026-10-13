@@ -24,6 +24,15 @@ Conectar ChatGPT a projetos locais explicitamente autorizados por MCP privado, c
 
 ## Frentes e estado
 
+### M01.9 — Diagnóstico e observabilidade (13/10/2026)
+
+- `STARTUP_CAUSE`: NOT_DETERMINED — a amostra M01.8 identificou `restartCount=1`, mas não reteve eventos da transição; o log operacional do Agendador estava desabilitado. Não atribuir a demora a rede ou timeout sem evidência.
+- `STARTUP_DIAGNOSTICS`: READY_FOR_NEXT_LOGON — JSONL sanitizado em `%LOCALAPPDATA%\Nodaris\supervisor\startup-events.jsonl`, três rotações de 256 KiB, ACL protegida para usuário atual + SYSTEM. Campos cobrem timestamp/duração, componente, estágio, tentativa, timeout, backoff, status e motivo enumerado.
+- `FAILURE_DIAGNOSTICS`: IMPLEMENTED — distingue falha de início, porta ocupada, health/auth/transport, processo encerrado, timeout, retry e circuito aberto; não grava mensagens brutas.
+- `TUNNEL_READINESS`: IMPLEMENTED — separa processo vivo, health local e `control-plane ok/polling` recente; status da tarefa continua sem parar processos.
+- `NEXT_LOGON_MEASUREMENT`: PENDING — testes fixture e documentação preparados; aguardar próxima execução natural da tarefa. Não iniciar tarefa ou reiniciar Windows automaticamente.
+- `TESTS`: PASS — 13/13 testes, incluindo harness Windows PowerShell em fixtures para falha, backoff, sanitização, ACL e rotação; typecheck, lint, formatação e parse PowerShell passaram.
+
 ### M01.8 — Inicialização invisível Windows (13/10/2026)
 
 - `AUTO_START`: PASS — após sair/entrar novamente, o proprietário confirmou ausência de janela. `LastRunTime=15:17:17`, `LastTaskResult=0`, supervisor iniciou às 15:17:45; árvore confirmou os serviços descendentes do supervisor.
@@ -63,7 +72,7 @@ Conectar ChatGPT a projetos locais explicitamente autorizados por MCP privado, c
 | TUNNEL_RUNTIME          | PASS      | API autenticada; `doctor` PASS; probes HTTP 200; health detalhado `control-plane: ok/polling` |
 | CHATGPT_PLUGIN          | PASS      | Proprietário confirmou o plugin no workspace pessoal                                          |
 | CHATGPT_REAL_CONNECTION | PASS      | Proprietário confirmou sete tools; README e pesquisa retornaram dados locais                  |
-| WINDOWS_RESTART         | PENDING   | Sem serviço/tarefa de início automático; teste após reinício ainda não executado              |
+| WINDOWS_RESTART         | PASS      | Proprietário confirmou tarefa automática silenciosa e chamadas locais pelo ChatGPT após logon |
 | NETWORK_RECONNECT       | PENDING   | Polling atual observado; interrupção/restauração de internet ainda não testada                |
 | CREDENTIAL_CLEANUP      | PENDING   | Cópia TXT da runtime key continua em Downloads; proprietário deve removê-la manualmente       |
 

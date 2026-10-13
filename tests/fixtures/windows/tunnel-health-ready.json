@@ -1,0 +1,15 @@
+{
+  "live": true,
+  "ready": true,
+  "components": {
+    "control-plane": {
+      "status": "ok",
+      "state": "polling",
+      "details": {
+        "last_success": "2026-10-13T19:00:00.000Z",
+        "effective_wait_seconds": 30,
+        "deadline_seconds": 35
+      }
+    }
+  }
+}
