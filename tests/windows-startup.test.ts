@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const launcherPath = new URL("../scripts/windows/launcher.vbs", import.meta.url);
 const managerPath = new URL("../scripts/windows/nodaris.ps1", import.meta.url);
+const supervisorPath = new URL("../scripts/windows/supervisor.ps1", import.meta.url);
 
 describe("inicialização invisível do Windows", () => {
   it("usa WScript com janela oculta e sem credenciais em argumentos", async () => {
@@ -28,5 +29,20 @@ describe("inicialização invisível do Windows", () => {
     );
     expect(repair).toContain("Set-ScheduledTask -TaskName $taskName -Action $action");
     expect(repair).not.toMatch(/NODARIS_TOKEN|Bearer|runtime.?key|api.?key/i);
+  });
+
+  it("distingue health local do polling recente no plano de controle", async () => {
+    const manager = await readFile(managerPath, "utf8");
+    const supervisor = await readFile(supervisorPath, "utf8");
+
+    expect(manager).toContain("health?details=true");
+    expect(manager).toContain("$controlPlane.status -ne 'ok'");
+    expect(manager).toContain("$controlPlane.state -ne 'polling'");
+    expect(manager).toContain("effective_wait_seconds");
+    expect(manager).toContain("deadline_seconds");
+    expect(manager).toContain("$lastSuccessValue -is [DateTime]");
+    expect(manager).toContain("tunnel_chatgpt_readiness=");
+    expect(supervisor).toContain("healthz");
+    expect(supervisor).not.toContain("'/health?details=true'");
   });
 });

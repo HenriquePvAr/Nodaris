@@ -1,6 +1,6 @@
 # Plano de testes de estabilidade M01.8
 
-Atualizado em 13/10/2026. A conexão real pelo ChatGPT foi confirmada pelo proprietário. Os cenários abaixo ainda não foram executados; este documento não os marca como aprovados.
+Atualizado em 13/10/2026. A conexão real pelo ChatGPT e a inicialização silenciosa após novo logon foram confirmadas pelo proprietário. A queda/restauração da internet e a recuperação após encerramento inesperado de serviços continuam pendentes.
 
 ## Estado antes dos testes
 
@@ -12,7 +12,7 @@ Atualizado em 13/10/2026. A conexão real pelo ChatGPT foi confirmada pelo propr
 
 ## Tarefa de logon e supervisor
 
-**Estado: TAREFA REGISTRADA; teste de interrupção não executado.** Os scripts em `scripts/windows/` criam tarefa no logon interativo do usuário atual, nível `Limited`, sem `SYSTEM`. A definição não contém segredos. A inicialização é sequencial: agente (health autenticado), gateway (listener de loopback), tunnel-client (perfil fixado). Uma única instância é solicitada pelo Agendador e mutex local; conflito de porta interrompe a tentativa em vez de abrir outro listener.
+**Estado: inicialização automática silenciosa confirmada; testes de interrupção pendentes.** Os scripts em `scripts/windows/` criam tarefa no logon interativo do usuário atual, nível `Limited`, sem `SYSTEM`. A definição não contém segredos. A inicialização é sequencial: agente (health autenticado), gateway (listener de loopback), tunnel-client (perfil fixado). Uma única instância é solicitada pelo Agendador e mutex local; conflito de porta interrompe a tentativa em vez de abrir outro listener.
 
 Use `scripts/windows/nodaris.ps1 install|start|stop|restart|status|enable|disable|uninstall`. A instalação não inicia nem encerra processos ativos. O supervisor observa somente a saída dos próprios processos, usa backoff 5/15/30/60/120 segundos e abre circuito após cinco tentativas. Ele não reinicia tunnel-client por perda de internet: o cliente v0.0.15 documenta polling com retry/backoff de erros de transporte ([código/documentação oficial](https://github.com/openai/tunnel-client/blob/v0.0.15/pkg/controlplane/doc.go)); health/readiness precisam ser observados após a restauração. Essa capacidade documentada ainda não substitui o teste real de queda/restauração.
 
@@ -38,11 +38,28 @@ Os processos Nodaris/tunnel-client estavam ativos na revisão, então validar `s
 5. Se a tarefa não iniciar a pilha, use o comando de status e anote o erro sem coletar conteúdo de segredo; não amplie allowlist nem desative Bearer.
 6. Confirmar `/healthz` e `/readyz` em HTTP 200 e `control-plane: ok/polling` no endpoint local de detalhes.
 7. Repetir pelo ChatGPT `nodaris_health`, `nodaris_projects_list`, `nodaris_project_tree`, `nodaris_file_read` (`README.md`), `nodaris_code_search`, `nodaris_git_status` e `nodaris_git_log`. Confirmar que a lista continua limitada a Nodaris.
-8. Registrar hora, resultados por etapa e qualquer inicialização manual necessária. A conectividade após restart já foi confirmada pelo proprietário; o cenário de inicialização silenciosa só passa após novo logon confirmando ausência de console visível e a tarefa iniciando os processos.
+8. Registrar hora, resultados por etapa e qualquer inicialização manual necessária. O proprietário confirmou conectividade após restart e ausência de console no novo logon; ainda falta observar perda/restauração de internet.
 
-## Cenário C — launcher invisível
+## Cenário C — launcher invisível e readiness do túnel
 
-**Status: PENDENTE DE NOVO LOGON.** Os testes automatizados verificam que o VBS chama `WScript.Shell.Run` com modo de janela `0`, que os argumentos não carregam credenciais, e que a ação da tarefa usa `wscript.exe`. Após `repair`, verifique a ação e o principal da tarefa por `status`/Agendador. Para comprovar visualmente, solicite ao proprietário uma janela de teste de logoff/logon; não encerre a janela PowerShell atual nem reinicie o computador sem autorização. Depois do logon, confirme agente, gateway, tunnel-client, health autenticado, readiness do túnel e PIDs únicos.
+**Status: PASS para logon silencioso e conexões ChatGPT; telemetria de tempos parcial.** Em 13/10/2026, após novo logon, o proprietário confirmou ausência de janela e reteste ChatGPT. A tarefa teve `LastRunTime=15:17:17`, código `0`; PowerShell supervisor iniciou `15:17:45`. Processo supervisor → agente/gateway/tunnel-client foi confirmado pela árvore de processos. Não há log detalhado de todas as transições: o Operational do Agendador está desabilitado e o arquivo de estado do supervisor mantém somente o estado mais recente.
+
+### Sequência e latência observadas (hora Manaus)
+
+| Marco                                           | Horário  | Evidência                                                       |
+| ----------------------------------------------- | -------- | --------------------------------------------------------------- |
+| Último início registrado da tarefa; resultado 0 | 15:17:17 | `Get-ScheduledTaskInfo`; código 0 observado depois              |
+| Supervisor PowerShell iniciou                   | 15:17:45 | horário de início do processo e PID pai dos serviços            |
+| Agente iniciou                                  | 15:20:28 | árvore de processos; estado atual `restartCount=1`              |
+| Gateway iniciou                                 | 15:20:43 | árvore de processos                                             |
+| tunnel-client iniciou                           | 15:20:46 | árvore de processos; processo v0.0.15                           |
+| Último despacho na amostra                      | 15:21:01 | telemetria do dispatcher; não indica o primeiro despacho        |
+| Poll bem-sucedido da amostra                    | 15:29:07 | `last_success` no endpoint de health                            |
+| Snapshot saudável observado                     | 15:29:17 | `ready=true`, `ok/polling`, 0 falhas, seis despachos concluídos |
+
+Latências derivadas: 28s entre o horário registrado da tarefa e início do supervisor; 2min43s do supervisor ao agente; 15s do agente ao gateway; 3s do gateway ao tunnel-client. O último despacho na amostra ocorreu 15s após o início do tunnel-client. O horário do primeiro polling/dispatch não está disponível. O log não explica a espera de 2min43s e o horário da primeira mensagem de timeout não foi registrado; não inferir relação causal entre os eventos.
+
+`/readyz` HTTP 200 representa health local do tunnel-client e não prova polling ao plano de controle. Antes de usar o plugin, execute `scripts/windows/nodaris.ps1 status` e aguarde `tunnel_chatgpt_readiness=READY`, que requer `ok/polling` e último sucesso recente, calculado pela janela de espera efetiva + deadline publicada pelo cliente. Após isso, faça uma chamada de health e reteste qualquer chamada que falhar. Essa prontidão não prova que o transporte MCP foi totalmente observado pelo endpoint local: a telemetria registrou `mcp=unknown` por ausência de evidência do transporte, mesmo com chamadas reais confirmadas pelo ChatGPT.
 
 ## Cenário B — perda e restauração de internet
 

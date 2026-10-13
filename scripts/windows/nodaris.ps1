@@ -35,6 +35,26 @@ function Get-LocalPortState([int]$Port) {
   } catch { return $false } finally { $client.Dispose() }
 }
 
+function Test-TunnelControlPlaneReadiness($Health) {
+  $controlPlane = $Health.components.'control-plane'
+  if ($null -eq $controlPlane -or $controlPlane.status -ne 'ok' -or $controlPlane.state -ne 'polling') { return $false }
+  if ($null -eq $controlPlane.details.last_success) { return $false }
+  try {
+    $lastSuccessValue = $controlPlane.details.last_success
+    if ($lastSuccessValue -is [DateTimeOffset]) {
+      $lastSuccess = $lastSuccessValue.ToUniversalTime()
+    } elseif ($lastSuccessValue -is [DateTime]) {
+      $lastSuccess = [DateTimeOffset]::new($lastSuccessValue.ToUniversalTime())
+    } else {
+      $lastSuccess = [DateTimeOffset]::Parse([string]$lastSuccessValue, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+    }
+    $pollWindow = [int]$controlPlane.details.effective_wait_seconds + [int]$controlPlane.details.deadline_seconds
+    if ($pollWindow -le 0) { return $false }
+    $ageSeconds = [Math]::Max(0, ([DateTimeOffset]::UtcNow - $lastSuccess).TotalSeconds)
+    return $ageSeconds -le $pollWindow
+  } catch { return $false }
+}
+
 function Show-Status {
   $task = Get-NodarisTask
   $state = Get-SupervisorState
@@ -53,6 +73,20 @@ function Show-Status {
     $ready = Invoke-WebRequest -Uri 'http://127.0.0.1:8080/readyz' -TimeoutSec 2 -UseBasicParsing
     'tunnel_ready=' + $ready.StatusCode
   } catch { 'tunnel_ready=NOT_READY_OR_UNAVAILABLE' }
+  try {
+    $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8080/health?details=true' -TimeoutSec 2
+    $controlPlane = $health.components.'control-plane'
+    if ($null -eq $controlPlane) {
+      'tunnel_control_plane=NOT_REPORTED'
+      'tunnel_chatgpt_readiness=WAITING'
+    } else {
+      'tunnel_control_plane={0}/{1}' -f $controlPlane.status,$controlPlane.state
+      'tunnel_chatgpt_readiness=' + $(if (Test-TunnelControlPlaneReadiness $health) { 'READY' } else { 'WAITING_FOR_RECENT_POLL' })
+    }
+  } catch {
+    'tunnel_control_plane=UNAVAILABLE'
+    'tunnel_chatgpt_readiness=WAITING'
+  }
 }
 
 function Start-Nodaris {

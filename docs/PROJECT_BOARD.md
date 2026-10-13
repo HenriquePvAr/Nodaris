@@ -26,13 +26,15 @@ Conectar ChatGPT a projetos locais explicitamente autorizados por MCP privado, c
 
 ### M01.8 — Inicialização invisível Windows (13/10/2026)
 
-- `AUTO_START`: PARTIAL — a tarefa executou após reinício e a chamada MCP foi confirmada. A ação foi atualizada para `wscript.exe` + VBS e a definição anterior foi exportada com ACL restrita. A ausência de janela aguarda validação no próximo logon.
+- `AUTO_START`: PASS — após sair/entrar novamente, o proprietário confirmou ausência de janela. `LastRunTime=15:17:17`, `LastTaskResult=0`, supervisor iniciou às 15:17:45; árvore confirmou os serviços descendentes do supervisor.
 - `PROCESS_RECOVERY`: PARTIAL — supervisor preparado com ordem agente → gateway → tunnel-client, mutex, fail-closed em conflito de porta e backoff limitado; recuperação/stop/restart não exercitados porque os processos estão ativos.
 - `NETWORK_RECONNECT`: PENDING — health local do cliente respondeu HTTP 200; nenhuma queda/restauração foi provocada.
-- `WINDOWS_RESTART`: PARTIAL — reinício e conectividade foram confirmados pelo proprietário; PIDs dos serviços descendem do processo PowerShell iniciado pelo Agendador. Invisibilidade ainda não validada.
-- `CHATGPT_REVALIDATION`: PASS — proprietário confirmou após reinício health, projetos, leitura de README e Git status locais; este resultado não prova launcher silencioso.
+- `WINDOWS_RESTART`: PASS — após novo logon, a tarefa iniciou a cadeia sem janela visível; supervisor e filhos foram observados ativos, e ChatGPT consultou os dados locais. Latência de startup permanece registrada separadamente como parcial.
+- `CHATGPT_REVALIDATION`: PASS — após novo logon, proprietário confirmou health, projetos, leitura de README, Git status/log e busca de código. A primeira chamada teve timeout de polling reportado; o reteste funcionou.
 - `SECURITY`: PASS — raízes/binds do supervisor fixos, nove tools preservadas, ACL do Bearer/runtime key/perfil restritas a conta atual + SYSTEM; perfil corrigido de valor literal para referência `file:` protegida; lookup read-only do túnel com a chave protegida retornou sucesso. TXT temporário não foi usado nem removido.
-- `TESTS`: PASS — 11/11 testes, typecheck, lint, formatação, `git diff --check` e parse PowerShell passaram; testes estáticos cobrem modo oculto, ausência de credenciais e backup antes do reparo. O primeiro `pnpm test` sem elevação foi bloqueado pelo sandbox; repetido com acesso autorizado ao workspace.
+- `TESTS`: PASS — 12/12 testes, typecheck, lint, formatação, `git diff --check` e parse PowerShell passaram; os testes cobrem o launcher, backup e distinção entre health local e polling do plano de controle.
+- `STARTUP_LATENCY`: PARTIAL — supervisor iniciou 28s após `LastRunTime`; agente 2min43s depois; gateway +15s; túnel +3s. A amostra registra despacho às 15:21:01 e polling bem-sucedido às 15:29:07; primeiro poll/dispatch não foi retido. Estado anotou uma tentativa adicional do agente. Histórico operacional desabilitado, sem causa comprovável para o intervalo.
+- `TUNNEL_READINESS`: PASS — telemetria às 15:29:17 reportou `ok/polling`, zero falhas consecutivas, poll com 10,6s e seis despachos concluídos. `nodaris.ps1 status` agora separa `/readyz` local da prontidão baseada em polling recente. A primeira falha não tem timestamp/log local; o reteste foi confirmado pelo proprietário.
 - Nodaris Teams permanece somente ideia futura, sem implementação.
 
 ### M01.6 — Licenciamento
