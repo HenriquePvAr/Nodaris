@@ -1,4 +1,4 @@
-# Plano de testes de estabilidade M01.5
+# Plano de testes de estabilidade M01.7
 
 Atualizado em 13/10/2026. A conexão real pelo ChatGPT foi confirmada pelo proprietário. Os cenários abaixo ainda não foram executados; este documento não os marca como aprovados.
 
@@ -6,9 +6,26 @@ Atualizado em 13/10/2026. A conexão real pelo ChatGPT foi confirmada pelo propr
 
 - Agente, gateway e `tunnel-client v0.0.15` estavam ativos em `127.0.0.1:3334`, `127.0.0.1:3333` e `127.0.0.1:8080`.
 - O health detalhado mostrou `control-plane: ok/polling`; isso é uma observação pontual, não comprova recuperação de uma queda futura.
-- Não foram encontrados serviços Windows, tarefas agendadas, entradas Run ou atalhos Startup com nome Nodaris ou tunnel-client. Início após reinício do Windows não está configurado e requer operação manual.
+- Na inspeção M01.7, foi registrada `Nodaris User Session`, habilitada, com gatilho `AtLogOn`, usuário `Dell`, logon `Interactive` e nível `Limited`. Listeners loopback já estavam ativos, por isso nenhum serviço foi parado ou reiniciado. O supervisor ainda não foi executado.
 - A raiz autorizada segue exclusivamente `C:\Users\Dell\Downloads\Nodaris`.
-- ACL dos arquivos locais de segredo inclui apenas a conta Windows atual e SYSTEM. A cópia TXT de origem da runtime key ainda estava em Downloads; removê-la manualmente.
+- ACLs verificadas para `gateway-token.txt` e `secrets/control-plane-api-key.txt`: permissões FullControl somente para a conta atual e SYSTEM. A remoção do TXT temporário de Downloads continua sendo ação manual do proprietário.
+
+## Tarefa de logon e supervisor
+
+**Estado: TAREFA REGISTRADA; teste de interrupção não executado.** Os scripts em `scripts/windows/` criam tarefa no logon interativo do usuário atual, nível `Limited`, sem `SYSTEM`. A definição não contém segredos. A inicialização é sequencial: agente (health autenticado), gateway (listener de loopback), tunnel-client (perfil fixado). Uma única instância é solicitada pelo Agendador e mutex local; conflito de porta interrompe a tentativa em vez de abrir outro listener.
+
+Use `scripts/windows/nodaris.ps1 install|start|stop|restart|status|enable|disable|uninstall`. A instalação não inicia nem encerra processos ativos. O supervisor observa somente a saída dos próprios processos, usa backoff 5/15/30/60/120 segundos e abre circuito após cinco tentativas. Ele não reinicia tunnel-client por perda de internet: o cliente v0.0.15 documenta polling com retry/backoff de erros de transporte ([código/documentação oficial](https://github.com/openai/tunnel-client/blob/v0.0.15/pkg/controlplane/doc.go)); health/readiness precisam ser observados após a restauração. Essa capacidade documentada ainda não substitui o teste real de queda/restauração.
+
+Os processos Nodaris/tunnel-client estavam ativos na revisão, então validar `stop`/`restart` depende de janela aprovada pelo proprietário. Não executar esses comandos até obter autorização específica para interromper os processos ativos.
+
+## Smoke checks M01.7 — 13/10/2026
+
+- Parser PowerShell: `nodaris.ps1` e `supervisor.ps1` passaram.
+- Agendador: tarefa consultada com `Ready`, habilitada, `User=Dell`, `RunLevel=Limited`, `LogonType=Interactive`, gatilho `MSFT_TaskLogonTrigger`; `disable` retornou `Enabled=False` e `enable` restaurou `Enabled=True`. Nenhuma execução manual foi solicitada.
+- Estado local: status mostrou portas 3333, 3334 e 8080 escutando em loopback, supervisor sem estado (não executado). `/healthz` e `/readyz` responderam HTTP 200.
+- Credenciais: ACL dos arquivos Bearer/runtime API key e do perfil protegidas contra herança, FullControl somente para os SIDs da conta atual e SYSTEM. Foi detectado que o perfil mantinha a runtime key como valor literal; sem exibir/copiar esse valor, ele foi substituído por `file:` apontando ao arquivo protegido e o perfil recebeu ACL restrita. `tunnel-client admin tunnels get` read-only usando a chave carregada somente em memória do arquivo protegido retornou sucesso, sem usar a cópia TXT de Downloads. `doctor` confirmou perfil, tunnel ID, referência da API key e alvo MCP; resultado global FAIL apenas pelo conflito no bind `127.0.0.1:8080`, já ocupado pelo tunnel-client ativo. Saídas com metadados foram descartadas e nenhuma chave foi impressa.
+- Validação automatizada: `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm test` (9/9) e `git diff --check` passaram; parser dos dois scripts passou. Smoke status confirmou tarefa habilitada e conta/SID esperado, supervisor ainda não executado, nove ferramentas no gateway, raiz Nodaris fixa e health local `/readyz` HTTP 200.
+- Queda/restauração de internet, reinício do Windows, stop/restart e chamada real pelo ChatGPT após esses eventos não foram testados.
 
 ## Cenário A — reinício do Windows
 
@@ -17,11 +34,11 @@ Atualizado em 13/10/2026. A conexão real pelo ChatGPT foi confirmada pelo propr
 1. Agendar um período em que o proprietário possa interromper a sessão; salvar os demais trabalhos e confirmar que consegue acessar os segredos locais sem mostrá-los.
 2. Antes do reinício, registrar a hora e confirmar `/healthz`, `/readyz` e `/health?details=true` em loopback. Não guardar corpos que possam conter dados além dos campos de estado necessários.
 3. Reiniciar o Windows e entrar na conta autorizada.
-4. Verificar se existem listeners em `127.0.0.1:3333`, `127.0.0.1:3334` e `127.0.0.1:8080`. Como não há serviço/tarefa configurado, a ausência de listeners é esperada e demonstra que o início automático não está disponível.
-5. Iniciar manualmente agente e gateway pelo procedimento local aprovado, mantendo `NODARIS_TOKEN` fora de argumentos e logs e usando somente a raiz autorizada. Iniciar o perfil `nodaris-local` pelo mecanismo de segredo já provisionado.
+4. Verificar a execução da tarefa habilitada e listeners em `127.0.0.1:3333`, `127.0.0.1:3334` e `127.0.0.1:8080`.
+5. Se a tarefa não iniciar a pilha, use o comando de status e anote o erro sem coletar conteúdo de segredo; não amplie allowlist nem desative Bearer.
 6. Confirmar `/healthz` e `/readyz` em HTTP 200 e `control-plane: ok/polling` no endpoint local de detalhes.
 7. Repetir pelo ChatGPT `nodaris_health`, `nodaris_projects_list`, `nodaris_project_tree`, `nodaris_file_read` (`README.md`), `nodaris_code_search`, `nodaris_git_status` e `nodaris_git_log`. Confirmar que a lista continua limitada a Nodaris.
-8. Registrar hora, resultados por etapa e qualquer inicialização manual necessária. O cenário de recuperação manual só passa se MCP e chamadas reais voltarem a funcionar; início automático permanece NOT_CONFIGURED até existir e ser testado uma configuração específica.
+8. Registrar hora, resultados por etapa e qualquer inicialização manual necessária. O cenário só passa quando agente, gateway, túnel e chamadas reais forem confirmados após o restart; configuração de logon instalada, por si só, não comprova a execução automática.
 
 ## Cenário B — perda e restauração de internet
 

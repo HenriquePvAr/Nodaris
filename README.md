@@ -50,4 +50,4 @@ pnpm format:check
 pnpm test
 ```
 
-Veja [desenvolvimento](docs/guides/DEVELOPMENT.md), [implantação local](docs/guides/DEPLOYMENT.md), [plano de estabilidade](docs/guides/STABILITY_TESTS.md), [autenticação GitHub](docs/guides/GITHUB_AUTH.md), [conexão ChatGPT](docs/guides/CHATGPT_TUNNEL.md), [arquitetura](docs/architecture/ARCHITECTURE.md) e [segurança](docs/security/SECURITY.md).
+Veja [desenvolvimento](docs/guides/DEVELOPMENT.md), [implantação local e inicialização no Windows](docs/guides/DEPLOYMENT.md), [plano de estabilidade](docs/guides/STABILITY_TESTS.md), [autenticação GitHub](docs/guides/GITHUB_AUTH.md), [conexão ChatGPT](docs/guides/CHATGPT_TUNNEL.md), [arquitetura](docs/architecture/ARCHITECTURE.md) e [segurança](docs/security/SECURITY.md).

@@ -24,12 +24,23 @@ Conectar ChatGPT a projetos locais explicitamente autorizados por MCP privado, c
 
 ## Frentes e estado
 
+### M01.7 — Estabilidade Windows (13/10/2026)
+
+- `AUTO_START`: PARTIAL — tarefa `Nodaris User Session` registrada e habilitada para logon do usuário Dell, `Interactive`, `Limited`, sem `SYSTEM`; ainda não disparada em novo logon.
+- `PROCESS_RECOVERY`: PARTIAL — supervisor preparado com ordem agente → gateway → tunnel-client, mutex, fail-closed em conflito de porta e backoff limitado; recuperação/stop/restart não exercitados porque os processos estão ativos.
+- `NETWORK_RECONNECT`: PENDING — health local do cliente respondeu HTTP 200; nenhuma queda/restauração foi provocada.
+- `WINDOWS_RESTART`: PENDING — computador não foi reiniciado.
+- `CHATGPT_REVALIDATION`: PENDING — novas chamadas reais pelo ChatGPT após logon ainda aguardam teste.
+- `SECURITY`: PASS — raízes/binds do supervisor fixos, nove tools preservadas, ACL do Bearer/runtime key/perfil restritas a conta atual + SYSTEM; perfil corrigido de valor literal para referência `file:` protegida; lookup read-only do túnel com a chave protegida retornou sucesso. TXT temporário não foi usado nem removido.
+- `TESTS`: PASS — typecheck, lint, Prettier, `git diff --check`, 9/9 testes, parse dos dois scripts e smoke checks de tarefa/status/health passaram.
+- Nodaris Teams permanece somente ideia futura, sem implementação.
+
 ### M01.6 — Licenciamento
 
-- Licença escolhida: PolyForm Noncommercial 1.0.0 (`PolyForm-Noncommercial-1.0.0`); aviso `Required Notice` do titular confirmado. Evidência local ainda não commitada nesta atualização: `LICENSE`, `THIRD_PARTY_NOTICES.md`, `docs/legal/` e ADR-0001.
+- Licença PolyForm Noncommercial 1.0.0 (`PolyForm-Noncommercial-1.0.0`) aplicada e registrada em `LICENSE`, `THIRD_PARTY_NOTICES.md`, `docs/legal/` e ADR-0001. Commit `3242b96` enviado à `origin/main`.
 - Dependências foram inventariadas a partir do lockfile e grafo instalado; runtimes e ferramentas de desenvolvimento permanecem sob licenças próprias. Nenhum MCP novo ou código de terceiros foi incorporado.
-- Validação desta atualização: typecheck, lint, formatação, `git diff --check` e 9 testes passaram. Alterações permanecem locais até revisão/commit.
-- Próxima ação: consolidar a documentação na `main` por commit convencional e push normal.
+- Validação da M01.6: typecheck, lint, formatação, `git diff --check` e 9 testes passaram.
+- M01.7: tarefa de logon instalada; scripts de supervisão local preparados; validação após reinício, interrupção de serviço e queda de rede continua pendente. Nenhum serviço foi parado nesta tarefa.
 - Uso comercial depende de autorização separada conforme a licença; contribuições externas requerem confirmação explícita dos termos documentados.
 
 | Frente                  | Estado                                                                              | Próxima ação                                            |
@@ -39,6 +50,7 @@ Conectar ChatGPT a projetos locais explicitamente autorizados por MCP privado, c
 | Integração MCP          | Gateway Streamable HTTP; bearer obrigatório; ferramentas só leitura                 | Manter confirmação de isolamento                        |
 | Secure MCP Tunnel       | Runtime key autenticada; processo ativo; plano de controle `ok/polling`             | Testar reconexão após indisponibilidade de rede         |
 | Integrações open source | Avaliadas; nenhuma ferramenta com escrita foi exposta                               | Serena M02, MetaMCP M03, conforme decisões documentadas |
+| Nodaris Teams           | Ideia futura, sem implementação                                                     | Avaliar somente após estabilização local                |
 
 ## Estados independentes M01.5
 
