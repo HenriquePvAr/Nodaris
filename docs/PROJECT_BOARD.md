@@ -14,13 +14,13 @@ Conectar ChatGPT a projetos locais explicitamente autorizados por MCP privado, c
 - MCP Inspector 2.10.1 conectou por Streamable HTTP e listou as nove ferramentas; todas anunciaram `readOnlyHint: true`.
 - Leitura, busca, árvore, Git status/log/diff, concorrência, agente offline/reconexão e bloqueios de token/caminhos externos foram exercitados em fixtures.
 - Secure MCP Tunnel não configurado/testado. A conexão ChatGPT é **BLOCKED**: faltam tunnel ID, runtime API key, permissões, raiz real aprovada e estratégia de autenticação compatível com ChatGPT.
-- Credencial GitHub local está inválida; push remoto não disponível.
+- Commit local `61d23e3` criado em `main`; push para `origin/main` recebeu HTTP 403 (`Permission denied` para a conta autenticada `HenriqueAraujo2026`).
 
 ## Frentes e estado
 
 | Frente                  | Estado                                                                   | Próxima ação                                                                           |
 | ----------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
-| Fundação                | Implementada e validada localmente                                       | Revisão final, commit local em `main`, push quando autenticação estiver renovada       |
+| Fundação                | Implementada, validada e commitada localmente em `main`                  | Renovar credencial/permissão GitHub e enviar fast-forward para `origin/main`           |
 | Filesystem/Git          | Ferramentas Nodaris somente leitura; testes em fixtures aprovados        | Aprovar uma raiz real candidata e repetir inspeção sem expor áreas não autorizadas     |
 | Integração MCP          | Gateway Streamable HTTP e agente separados; Inspector listou ferramentas | Executar leitura e diff via Inspector se necessário para evidência adicional           |
 | Secure MCP Tunnel       | Bloqueado por pré-requisitos externos e OAuth                            | Obter tunnel ID/runtime key/permissões e implementar auth compatível antes de conectar |
@@ -31,12 +31,12 @@ Conectar ChatGPT a projetos locais explicitamente autorizados por MCP privado, c
 - Allowlist real segue vazia. Não ativar acesso a diretórios pessoais sem aprovação explícita do usuário.
 - O gateway local usa bearer estático; a UI ChatGPT custom MCP documenta OAuth/sem autenticação e não oferece bearer arbitrário. Não remover auth como atalho.
 - Node/Windows não garante proteção completa contra toda condição de corrida TOCTOU; está documentado como risco residual.
-- `gh auth status` informa token inválido; commit/push precisam ser concluídos depois da renovação manual da sessão.
+- `gh auth status` informa token inválido; o push foi tentado e negado com HTTP 403. A renovação manual da sessão/permissão é necessária.
 
 ## Próximos passos
 
-1. Fazer revisão de segurança do diff local e criar commit Conventional Commit em `main`.
-2. Renovar autenticação GitHub e enviar fast-forward para a `main` remota sem força.
+1. Concluído: revisar o diff e criar commit Conventional Commit local em `main`.
+2. Renovar autenticação/permissão GitHub e enviar fast-forward para `origin/main` sem força.
 3. O usuário indicar/aprovar uma raiz local específica para habilitar descoberta real.
 4. Resolver autenticação OAuth e dados/permissões do Secure MCP Tunnel; testar uma chamada real do ChatGPT.
 5. M02: avaliar Serena isolada somente leitura, mantendo revisão da licença GPL-3.0-or-later.
