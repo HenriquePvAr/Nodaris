@@ -4,7 +4,7 @@ O Nodaris conecta um cliente MCP a projetos locais por meio de um gateway Stream
 
 ## Estado da M01
 
-Implementação inicial em desenvolvimento. Nenhuma raiz de projeto real está cadastrada por padrão. A conexão com ChatGPT depende de configuração e permissões do Secure MCP Tunnel e ainda não foi testada neste ambiente.
+MVP local versionado e validado em `main`; nenhuma raiz de projeto real está cadastrada por padrão. O acesso real ao ChatGPT depende da aprovação de uma raiz e da configuração do Secure MCP Tunnel, e ainda não foi testado neste ambiente.
 
 ## Requisitos
 
@@ -44,4 +44,4 @@ pnpm format:check
 pnpm test
 ```
 
-Veja [DEVELOPMENT.md](docs/guides/DEVELOPMENT.md), [arquitetura](docs/architecture/ARCHITECTURE.md) e [segurança](docs/security/SECURITY.md).
+Veja [desenvolvimento](docs/guides/DEVELOPMENT.md), [implantação local](docs/guides/DEPLOYMENT.md), [autenticação GitHub](docs/guides/GITHUB_AUTH.md), [conexão ChatGPT](docs/guides/CHATGPT_TUNNEL.md), [arquitetura](docs/architecture/ARCHITECTURE.md) e [segurança](docs/security/SECURITY.md).
