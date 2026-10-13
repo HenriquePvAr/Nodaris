@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henrique Paiva Araujo
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 

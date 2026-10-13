@@ -1,5 +1,9 @@
 # Nodaris
 
+## Licença
+
+O Nodaris é disponibilizado sob a [PolyForm Noncommercial 1.0.0](LICENSE) (`PolyForm-Noncommercial-1.0.0`). É software com código-fonte disponível sob termos que restringem usos comerciais; não é uma licença aprovada pela Open Source Initiative. Consulte [visão geral do licenciamento](docs/legal/LICENSING.md), [licenciamento comercial](docs/legal/COMMERCIAL_LICENSING.md), [política de contribuições](docs/legal/CONTRIBUTION_POLICY.md) e [avisos de terceiros](THIRD_PARTY_NOTICES.md).
+
 O Nodaris conecta um cliente MCP a projetos locais por meio de um gateway Streamable HTTP e um agente local. O agente aplica as raízes autorizadas, valida caminhos e limita operações; o gateway publica apenas ferramentas de consulta.
 
 ## Estado da M01

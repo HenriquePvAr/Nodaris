@@ -24,6 +24,14 @@ Conectar ChatGPT a projetos locais explicitamente autorizados por MCP privado, c
 
 ## Frentes e estado
 
+### M01.6 — Licenciamento
+
+- Licença escolhida: PolyForm Noncommercial 1.0.0 (`PolyForm-Noncommercial-1.0.0`); aviso `Required Notice` do titular confirmado. Evidência local ainda não commitada nesta atualização: `LICENSE`, `THIRD_PARTY_NOTICES.md`, `docs/legal/` e ADR-0001.
+- Dependências foram inventariadas a partir do lockfile e grafo instalado; runtimes e ferramentas de desenvolvimento permanecem sob licenças próprias. Nenhum MCP novo ou código de terceiros foi incorporado.
+- Validação desta atualização: typecheck, lint, formatação, `git diff --check` e 9 testes passaram. Alterações permanecem locais até revisão/commit.
+- Próxima ação: consolidar a documentação na `main` por commit convencional e push normal.
+- Uso comercial depende de autorização separada conforme a licença; contribuições externas requerem confirmação explícita dos termos documentados.
+
 | Frente                  | Estado                                                                              | Próxima ação                                            |
 | ----------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | Fundação                | MVP local e raiz única validados; conexão real ChatGPT confirmada pelo proprietário | Executar testes de estabilidade                         |

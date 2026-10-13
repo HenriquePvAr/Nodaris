@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henrique Paiva Araujo
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";

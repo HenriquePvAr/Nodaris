@@ -28,5 +28,6 @@
 
 - Preserve trabalho existente e use somente a branch `main`. Nunca force push, reset destrutivo ou branches extras.
 - Fixe versões, valide licenças e registre integrações em `docs/architecture/THIRD_PARTY_INTEGRATIONS.md`.
+- O projeto usa PolyForm Noncommercial 1.0.0 (`PolyForm-Noncommercial-1.0.0`); preserve os avisos, consulte `LICENSE`, `THIRD_PARTY_NOTICES.md` e `docs/legal/` antes de reutilizar ou distribuir código.
 - Rode typecheck, lint, formatação e testes quando a missão pedir validação; não declare PASS sem evidência.
 - Atualize `docs/PROJECT_BOARD.md` ao encerrar etapa relevante.

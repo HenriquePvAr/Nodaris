@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henrique Paiva Araujo
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 import { z } from "zod";
 
 export const projectIdSchema = z.string().min(1).max(128);

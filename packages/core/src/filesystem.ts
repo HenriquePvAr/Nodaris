@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henrique Paiva Araujo
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 import { createHash } from "node:crypto";
 import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
