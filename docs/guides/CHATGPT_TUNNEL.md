@@ -38,7 +38,7 @@ O ZIP Windows amd64 do `tunnel-client v0.0.15` teve SHA-256 conferido com `SHA25
 - Perfil `nodaris-local`: `control_plane.api_key` usa `file:`, MCP aponta para `http://127.0.0.1:3333/mcp`, e os cabeçalhos runtime e discovery referenciam o arquivo Bearer local protegido.
 - `tunnel-client doctor --profile nodaris-local --explain`: PASS. `/mcp` retornou 401 sem Bearer nas probes; os metadados OAuth ausentes retornaram 404 e a checagem reconheceu o servidor MCP sem OAuth.
 - Consulta read-only `tunnel-client admin tunnels get` com o runtime key protegido: PASS; o túnel retornado corresponde ao ID configurado. Não houve exposição do conteúdo do segredo.
-- `tunnel-client doctor --profile nodaris-local --explain`: PASS. Cliente `run` permaneceu ativo e `/healthz`, `/readyz` e `/ui` retornaram HTTP 200 em loopback.
+- `tunnel-client doctor --profile nodaris-local --explain`: PASS. Cliente `run` permaneceu ativo; `/healthz`, `/readyz` e `/ui` retornaram HTTP 200 em loopback. `/health?details=true` confirmou `control-plane` com estado `ok/polling`, evidência de comunicação ativa com o plano de controle. O componente MCP ainda não foi observado porque nenhuma chamada via ChatGPT ocorreu.
 - ChatGPT plugin e conexão real: pendentes. Não marcar PASS antes de chamadas ChatGPT reais.
 
 ## Procedimento após liberação

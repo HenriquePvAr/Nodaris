@@ -15,7 +15,7 @@ Conectar ChatGPT a projetos locais explicitamente autorizados por MCP privado, c
 - Leitura, busca, árvore, Git status/log/diff, concorrência, agente offline/reconexão e bloqueios de token/caminhos externos foram exercitados em fixtures.
 - Login GitHub refeito como `HenriquePvAr`; permissão ADMIN confirmada; helper Git configurado apenas localmente para este repositório.
 - Commits `61d23e3` e `7d3041f` enviados sem force; `origin/main` confirma `7d3041fdfa76e87206126026888800abf89f31fa`. Ambos atribuídos a Henrique, sem coautores.
-- `tunnel-client v0.0.15` instalado localmente em `%LOCALAPPDATA%\Nodaris\tunnel-client\v0.0.15`, checksum oficial conferido e licença/SPDX preservados. Perfil `nodaris-local` aponta para o túnel existente, o runtime key e o Bearer Nodaris usam arquivos locais protegidos. Após o proprietário atualizar o TXT local, `admin tunnels get` autenticou e confirmou o ID; `doctor --explain` passou e o cliente permaneceu ativo com `/healthz`, `/readyz` e `/ui` retornando HTTP 200 em loopback.
+- `tunnel-client v0.0.15` instalado localmente em `%LOCALAPPDATA%\Nodaris\tunnel-client\v0.0.15`, checksum oficial conferido e licença/SPDX preservados. Perfil `nodaris-local` aponta para o túnel existente, o runtime key e o Bearer Nodaris usam arquivos locais protegidos. Após o proprietário atualizar o TXT local, `admin tunnels get` autenticou e confirmou o ID; `doctor --explain` passou e o cliente permaneceu ativo. `/healthz`, `/readyz` e `/ui` retornaram HTTP 200; `/health?details=true` informou `control-plane: ok/polling`.
 - M01.2: agente/gateway executados em `127.0.0.1:3334/3333`, allowlist exclusiva Nodaris; o agente descobriu 1 projeto. Cliente MCP real listou 9 tools e validou health, machines, projects, árvore (41 entradas), busca, leitura de README, Git status/diff/log; `.env.local`, `.git/config` e caminho absoluto externo foram negados. `pnpm test` 9/9 e typecheck passaram.
 - M01.3: Bearer Nodaris e runtime key mantidos fora do repositório, em arquivos locais protegidos; o conteúdo não foi impresso, incluído em argumentos ou salvo em logs. O TXT temporário de origem ainda deve ser removido pelo proprietário.
 - O túnel e workspace foram criados pelo proprietário. Autenticação de controle confirmada com consulta somente leitura; o runtime está ativo localmente. O proprietário ainda precisa adicionar o túnel como servidor MCP no ChatGPT e executar chamadas reais.
@@ -32,13 +32,13 @@ Conectar ChatGPT a projetos locais explicitamente autorizados por MCP privado, c
 
 ## Estados independentes M01.3
 
-| Estado                  | Resultado | Evidência/pendência                                                                                |
-| ----------------------- | --------- | -------------------------------------------------------------------------------------------------- |
-| LOCAL_MCP               | PASS      | Nove tools locais; README lido; token inválido negado; raiz única                                  |
-| TUNNEL_CONFIG           | PASS      | Perfil `nodaris-local`; `doctor --explain` passou                                                  |
-| TUNNEL_RUNTIME          | PASS      | `admin tunnels get` autenticado; `doctor` PASS; `/healthz`, `/readyz` e `/ui` HTTP 200 em loopback |
-| CHATGPT_PLUGIN          | PENDING   | Criar/instalar manualmente após o túnel ficar pronto                                               |
-| CHATGPT_REAL_CONNECTION | PENDING   | Nenhuma chamada real pelo ChatGPT                                                                  |
+| Estado                  | Resultado | Evidência/pendência                                                                           |
+| ----------------------- | --------- | --------------------------------------------------------------------------------------------- |
+| LOCAL_MCP               | PASS      | Nove tools locais; README lido; token inválido negado; raiz única                             |
+| TUNNEL_CONFIG           | PASS      | Perfil `nodaris-local`; `doctor --explain` passou                                             |
+| TUNNEL_RUNTIME          | PASS      | API autenticada; `doctor` PASS; probes HTTP 200; health detalhado `control-plane: ok/polling` |
+| CHATGPT_PLUGIN          | PENDING   | Criar/instalar manualmente após o túnel ficar pronto                                          |
+| CHATGPT_REAL_CONNECTION | PENDING   | Nenhuma chamada real pelo ChatGPT                                                             |
 
 ## Limitações conhecidas
 
