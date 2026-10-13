@@ -19,10 +19,10 @@ O endpoint Nodaris não fica público. Não usar ngrok, port forwarding, listene
 
 1. Iniciar `pnpm dev:agent` e `pnpm dev:gateway` com o mesmo token e apenas as raízes aprovadas.
 2. Validar a conexão MCP local com fixtures e, depois de autorização explícita, com a raiz real. No ensaio local de 13/10/2026, as nove ferramentas foram listadas e chamadas; leitura, árvore, pesquisa, Git status/diff/log e negações de caminhos sensíveis/externos responderam conforme esperado.
-3. Criar perfil do `tunnel-client` com a release fixada, `tunnel_id`, MCP URL `http://127.0.0.1:3333/mcp` e runtime API key carregada como segredo. `tunnel-client v0.0.15` está instalado em `%LOCALAPPDATA%\Nodaris\tunnel-client\v0.0.15`; `nodaris-local` foi criado e `doctor` passou. A consulta read-only ao túnel retornou HTTP 401, então o daemon ainda não está ativo.
+3. Criar perfil do `tunnel-client` com a release fixada, `tunnel_id`, MCP URL `http://127.0.0.1:3333/mcp` e runtime API key carregada como segredo. `tunnel-client v0.0.15` está instalado em `%LOCALAPPDATA%\Nodaris\tunnel-client\v0.0.15`; `nodaris-local` foi criado. A consulta de leitura autenticada confirmou o túnel, `doctor` passou e o cliente está ativo.
 4. Configurar o header Bearer Nodaris via referência `env:` ou `file:` do campo `mcp.extra_headers`; manter o valor fora do YAML versionado.
-5. Executar `tunnel-client doctor --profile nodaris-local --explain`; confirmar a runtime key com `tunnel-client admin tunnels get <tunnel_id>`. Somente após autenticação aprovada iniciar o cliente e verificar `/healthz`, `/readyz` e `/ui` somente em loopback.
-6. Criar o conector Tunnel no workspace ChatGPT apropriado após validação de `/readyz`. Uma chamada real do ChatGPT é o único critério para validar a conexão ponta a ponta; não foi realizada ainda.
+5. Executar `tunnel-client doctor --profile nodaris-local --explain`; confirmar a runtime key com `tunnel-client admin tunnels get <tunnel_id>`. Após autenticação aprovada, iniciar o cliente e verificar `/healthz`, `/readyz` e `/ui` somente em loopback. Esses endpoints retornaram HTTP 200 em 13/10/2026.
+6. O proprietário deve criar o conector Tunnel no workspace ChatGPT apropriado. Validar a conexão ponta a ponta com chamadas reais do ChatGPT; ainda não realizadas.
 7. Interromper processos com Ctrl+C quando o ensaio terminar; M01.3 ainda não configura serviço persistente do Windows.
 
 ## Limites e rollback
@@ -31,6 +31,6 @@ O endpoint Nodaris não fica público. Não usar ngrok, port forwarding, listene
 - A autenticação de transporte do `tunnel-client` é independente do Bearer Nodaris usado no endpoint local.
 - A configuração sem autenticação no lado ChatGPT combinada a um header estático é uma identidade de serviço compartilhada. Não atende isolamento individual por usuário.
 - Se `/readyz`, autenticação do gateway, allowlist ou associação de workspace falhar, parar o cliente; não relaxar a autenticação ou aumentar a allowlist para contornar o erro.
-- O cliente está instalado localmente, mas o daemon não permanece ativo enquanto a consulta de runtime key retorna HTTP 401. A instalação ainda não foi configurada como serviço persistente do Windows.
+- O cliente está ativo localmente, mas ainda não foi configurado como serviço persistente do Windows; após reinicialização, deverá ser iniciado manualmente. O conector e a conexão real do ChatGPT ainda estão pendentes.
 
 Referências: [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels), [guia de configuração do tunnel-client v0.0.15](https://github.com/openai/tunnel-client/blob/v0.0.15/docs/configuration.md).
