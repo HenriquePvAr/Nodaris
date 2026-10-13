@@ -3,7 +3,7 @@
 
 param(
   [Parameter(Mandatory = $true, Position = 0)]
-  [ValidateSet('install', 'uninstall', 'start', 'stop', 'restart', 'status', 'enable', 'disable')]
+  [ValidateSet('install', 'repair', 'uninstall', 'start', 'stop', 'restart', 'status', 'enable', 'disable')]
   [string]$Command
 )
 
@@ -11,6 +11,7 @@ $ErrorActionPreference = 'Stop'
 $taskName = 'Nodaris User Session'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $supervisor = Join-Path $PSScriptRoot 'supervisor.ps1'
+$launcher = Join-Path $PSScriptRoot 'launcher.vbs'
 $stateRoot = Join-Path $env:LOCALAPPDATA 'Nodaris\supervisor'
 $stateFile = Join-Path $stateRoot 'state.json'
 $stopFile = Join-Path $stateRoot 'stop.request'
@@ -66,9 +67,8 @@ function Start-Nodaris {
   if ($task.Settings.Enabled) {
     Start-ScheduledTask -TaskName $taskName
   } else {
-    $powerShell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $arguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $supervisor
-    Start-Process -FilePath $powerShell -ArgumentList $arguments -WindowStyle Hidden
+    $wscript = Join-Path $env:WINDIR 'System32\wscript.exe'
+    Start-Process -FilePath $wscript -ArgumentList ('"{0}"' -f $launcher) -WindowStyle Hidden
   }
   'Solicitada inicialização Nodaris. Consulte status para verificar saúde.'
 }
@@ -87,14 +87,36 @@ switch ($Command) {
     $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($systemSid, 'FullControl', $inherit, 'None', 'Allow'))
     Set-Acl -LiteralPath $stateRoot -AclObject $acl
 
-    $powerShell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $arguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $supervisor
-    $action = New-ScheduledTaskAction -Execute $powerShell -Argument $arguments -WorkingDirectory $repoRoot
+    $wscript = Join-Path $env:WINDIR 'System32\wscript.exe'
+    $action = New-ScheduledTaskAction -Execute $wscript -Argument ('"{0}"' -f $launcher) -WorkingDirectory $repoRoot
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User ([Security.Principal.WindowsIdentity]::GetCurrent().Name)
     $principal = New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Inicia e supervisiona o Nodaris na sessão do usuário atual, em loopback.' | Out-Null
     'Tarefa instalada para o próximo logon do usuário atual. Nenhum serviço foi iniciado ou interrompido nesta operação.'
+  }
+  'repair' {
+    $task = Get-NodarisTask
+    if ($null -eq $task) { throw "A tarefa '$taskName' não existe; execute install." }
+    if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { throw 'Launcher sem console não encontrado.' }
+    New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
+    $backupFile = Join-Path $stateRoot 'task-before-invisible-launcher.xml'
+    $previousXml = Export-ScheduledTask -TaskName $taskName
+    [IO.File]::WriteAllText($backupFile, $previousXml, [Text.UTF8Encoding]::new($false))
+    $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $systemSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+    $fileAcl = [Security.AccessControl.FileSecurity]::new()
+    $fileAcl.SetAccessRuleProtection($true, $false)
+    $fileAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($currentSid), 'FullControl', 'Allow'))
+    $fileAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($systemSid, 'FullControl', 'Allow'))
+    Set-Acl -LiteralPath $backupFile -AclObject $fileAcl
+
+    $wscript = Join-Path $env:WINDIR 'System32\wscript.exe'
+    $action = New-ScheduledTaskAction -Execute $wscript -Argument ('"{0}"' -f $launcher) -WorkingDirectory $repoRoot
+    Set-ScheduledTask -TaskName $taskName -Action $action | Out-Null
+    $updated = Get-NodarisTask
+    if ($updated.Actions[0].Execute -ne $wscript) { throw 'A tarefa não confirmou o launcher atualizado; use o XML de recuperação local.' }
+    'Ação futura atualizada para wscript.exe. A sessão em execução não foi reiniciada; exportação de recuperação protegida foi preservada localmente.'
   }
   'uninstall' {
     if (Get-NodarisTask) { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false }

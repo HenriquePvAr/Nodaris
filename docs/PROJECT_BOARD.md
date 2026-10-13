@@ -19,20 +19,20 @@ Conectar ChatGPT a projetos locais explicitamente autorizados por MCP privado, c
 - M01.2: agente/gateway executados em `127.0.0.1:3334/3333`, allowlist exclusiva Nodaris; o agente descobriu 1 projeto. Cliente MCP real listou 9 tools e validou health, machines, projects, árvore (41 entradas), busca, leitura de README, Git status/diff/log; `.env.local`, `.git/config` e caminho absoluto externo foram negados. `pnpm test` 9/9 e typecheck passaram.
 - M01.3: Bearer Nodaris e runtime key mantidos fora do repositório, em arquivos locais protegidos; o conteúdo não foi impresso, incluído em argumentos ou salvo em logs. O TXT temporário de origem ainda deve ser removido pelo proprietário.
 - Em 13/10/2026, o proprietário confirmou chamadas reais do ChatGPT ao computador local pelas ferramentas `nodaris_health`, `nodaris_projects_list`, `nodaris_project_tree`, `nodaris_file_read`, `nodaris_code_search`, `nodaris_git_status` e `nodaris_git_log`. README e busca retornaram dados locais; só Nodaris foi identificado.
-- Revisão de estabilidade: os listeners estão em loopback e os arquivos de segredo têm ACL para a conta atual e SYSTEM. Não foram encontrados serviço, tarefa agendada, entrada Run ou atalho Startup correspondente; reinício do Windows e recuperação de rede seguem não testados. O TXT de origem da runtime key ainda estava em Downloads.
+- Revisão de estabilidade M01.7: os listeners estão em loopback; a tarefa de logon foi criada depois e o proprietário confirmou o primeiro reinício. Recuperação de rede segue não testada. O TXT de origem da runtime key ainda estava em Downloads.
 - Verificação M01.5 desta atualização documental: `pnpm test` 9/9, `pnpm typecheck`, `pnpm lint` e `pnpm format:check` passaram.
 
 ## Frentes e estado
 
-### M01.7 — Estabilidade Windows (13/10/2026)
+### M01.8 — Inicialização invisível Windows (13/10/2026)
 
-- `AUTO_START`: PARTIAL — tarefa `Nodaris User Session` registrada e habilitada para logon do usuário Dell, `Interactive`, `Limited`, sem `SYSTEM`; ainda não disparada em novo logon.
+- `AUTO_START`: PARTIAL — a tarefa executou após reinício e a chamada MCP foi confirmada. A ação foi atualizada para `wscript.exe` + VBS e a definição anterior foi exportada com ACL restrita. A ausência de janela aguarda validação no próximo logon.
 - `PROCESS_RECOVERY`: PARTIAL — supervisor preparado com ordem agente → gateway → tunnel-client, mutex, fail-closed em conflito de porta e backoff limitado; recuperação/stop/restart não exercitados porque os processos estão ativos.
 - `NETWORK_RECONNECT`: PENDING — health local do cliente respondeu HTTP 200; nenhuma queda/restauração foi provocada.
-- `WINDOWS_RESTART`: PENDING — computador não foi reiniciado.
-- `CHATGPT_REVALIDATION`: PENDING — novas chamadas reais pelo ChatGPT após logon ainda aguardam teste.
+- `WINDOWS_RESTART`: PARTIAL — reinício e conectividade foram confirmados pelo proprietário; PIDs dos serviços descendem do processo PowerShell iniciado pelo Agendador. Invisibilidade ainda não validada.
+- `CHATGPT_REVALIDATION`: PASS — proprietário confirmou após reinício health, projetos, leitura de README e Git status locais; este resultado não prova launcher silencioso.
 - `SECURITY`: PASS — raízes/binds do supervisor fixos, nove tools preservadas, ACL do Bearer/runtime key/perfil restritas a conta atual + SYSTEM; perfil corrigido de valor literal para referência `file:` protegida; lookup read-only do túnel com a chave protegida retornou sucesso. TXT temporário não foi usado nem removido.
-- `TESTS`: PASS — typecheck, lint, Prettier, `git diff --check`, 9/9 testes, parse dos dois scripts e smoke checks de tarefa/status/health passaram.
+- `TESTS`: PASS — 11/11 testes, typecheck, lint, formatação, `git diff --check` e parse PowerShell passaram; testes estáticos cobrem modo oculto, ausência de credenciais e backup antes do reparo. O primeiro `pnpm test` sem elevação foi bloqueado pelo sandbox; repetido com acesso autorizado ao workspace.
 - Nodaris Teams permanece somente ideia futura, sem implementação.
 
 ### M01.6 — Licenciamento

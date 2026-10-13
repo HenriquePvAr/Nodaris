@@ -1,4 +1,4 @@
-# Plano de testes de estabilidade M01.7
+# Plano de testes de estabilidade M01.8
 
 Atualizado em 13/10/2026. A conexão real pelo ChatGPT foi confirmada pelo proprietário. Os cenários abaixo ainda não foram executados; este documento não os marca como aprovados.
 
@@ -29,7 +29,7 @@ Os processos Nodaris/tunnel-client estavam ativos na revisão, então validar `s
 
 ## Cenário A — reinício do Windows
 
-**Status: PENDING / NÃO EXECUTADO.**
+**Status: PARCIAL.** Em 13/10/2026, o proprietário confirmou chamadas ChatGPT locais após reinício (`health`, lista de projetos, leitura de README e Git status). A tarefa estava `Running`; seu último resultado era `0x41301`, que indica execução em andamento. Os PIDs dos três serviços tinham como ancestral o PowerShell iniciado por `svchost.exe` do Agendador. A tarefa executou realmente, mas deixou uma janela visível. Após instalar o launcher invisível, falta novo logon para confirmar ausência da janela.
 
 1. Agendar um período em que o proprietário possa interromper a sessão; salvar os demais trabalhos e confirmar que consegue acessar os segredos locais sem mostrá-los.
 2. Antes do reinício, registrar a hora e confirmar `/healthz`, `/readyz` e `/health?details=true` em loopback. Não guardar corpos que possam conter dados além dos campos de estado necessários.
@@ -38,7 +38,11 @@ Os processos Nodaris/tunnel-client estavam ativos na revisão, então validar `s
 5. Se a tarefa não iniciar a pilha, use o comando de status e anote o erro sem coletar conteúdo de segredo; não amplie allowlist nem desative Bearer.
 6. Confirmar `/healthz` e `/readyz` em HTTP 200 e `control-plane: ok/polling` no endpoint local de detalhes.
 7. Repetir pelo ChatGPT `nodaris_health`, `nodaris_projects_list`, `nodaris_project_tree`, `nodaris_file_read` (`README.md`), `nodaris_code_search`, `nodaris_git_status` e `nodaris_git_log`. Confirmar que a lista continua limitada a Nodaris.
-8. Registrar hora, resultados por etapa e qualquer inicialização manual necessária. O cenário só passa quando agente, gateway, túnel e chamadas reais forem confirmados após o restart; configuração de logon instalada, por si só, não comprova a execução automática.
+8. Registrar hora, resultados por etapa e qualquer inicialização manual necessária. A conectividade após restart já foi confirmada pelo proprietário; o cenário de inicialização silenciosa só passa após novo logon confirmando ausência de console visível e a tarefa iniciando os processos.
+
+## Cenário C — launcher invisível
+
+**Status: PENDENTE DE NOVO LOGON.** Os testes automatizados verificam que o VBS chama `WScript.Shell.Run` com modo de janela `0`, que os argumentos não carregam credenciais, e que a ação da tarefa usa `wscript.exe`. Após `repair`, verifique a ação e o principal da tarefa por `status`/Agendador. Para comprovar visualmente, solicite ao proprietário uma janela de teste de logoff/logon; não encerre a janela PowerShell atual nem reinicie o computador sem autorização. Depois do logon, confirme agente, gateway, tunnel-client, health autenticado, readiness do túnel e PIDs únicos.
 
 ## Cenário B — perda e restauração de internet
 
