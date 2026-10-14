@@ -24,13 +24,13 @@ function Invoke-NodarisRecoveryPolicy {
     $retryCount++
     $attempt = $retryCount
     $delay = Get-NodarisBackoffSeconds ($attempt - 1)
-    & $EventAction 'recovery' 'started' 'process_exited' $attempt $delay
-    & $EventAction 'backoff' 'scheduled' 'retry_scheduled' $attempt $delay
+    & $EventAction 'recovery' 'started' 'process_exited' $attempt $delay | Out-Null
+    & $EventAction 'backoff' 'scheduled' 'retry_scheduled' $attempt $delay | Out-Null
     $backoffCompleted = & $BackoffAction $delay
     if ($backoffCompleted -is [bool] -and -not $backoffCompleted) {
       return @{ status = 'stopped'; retryCount = $retryCount; reasonCode = 'stop_requested' }
     }
-    & $EventAction 'backoff' 'completed' 'retry_delay_elapsed' $attempt $delay
+    & $EventAction 'backoff' 'completed' 'retry_delay_elapsed' $attempt $delay | Out-Null
 
     if (& $StopRequestedAction) {
       return @{ status = 'stopped'; retryCount = $retryCount; reasonCode = 'stop_requested' }
@@ -39,7 +39,7 @@ function Invoke-NodarisRecoveryPolicy {
     try {
       & $StartAction
       if (-not (& $HealthAction)) { throw 'NODARIS_HEALTH_TIMEOUT' }
-      & $EventAction 'recovery' 'healthy' 'health_passed' $attempt $delay
+      & $EventAction 'recovery' 'healthy' 'health_passed' $attempt $delay | Out-Null
       return @{ status = 'healthy'; retryCount = $retryCount; reasonCode = 'health_passed' }
     } catch {
       $reasonCode = if ($_.Exception.Message -eq 'NODARIS_PORT_IN_USE') {
@@ -50,11 +50,11 @@ function Invoke-NodarisRecoveryPolicy {
         'process_start_failed'
       }
       & $StopAction
-      & $EventAction 'recovery' 'failed' $reasonCode $attempt $delay
+      & $EventAction 'recovery' 'failed' $reasonCode $attempt $delay | Out-Null
     }
   }
 
-  & $EventAction 'recovery' 'failed' 'circuit_open' $retryCount 0
+  & $EventAction 'recovery' 'failed' 'circuit_open' $retryCount 0 | Out-Null
   return @{ status = 'circuit_open'; retryCount = $retryCount; reasonCode = 'circuit_open' }
 }
 
@@ -78,19 +78,19 @@ function Invoke-NodarisStartupPolicy {
     }
     if ($attempt -gt 1) {
       $delay = Get-NodarisBackoffSeconds ($attempt - 2)
-      & $EventAction 'backoff' 'scheduled' 'retry_scheduled' $attempt $delay
+      & $EventAction 'backoff' 'scheduled' 'retry_scheduled' $attempt $delay | Out-Null
       $backoffCompleted = & $BackoffAction $delay
       if ($backoffCompleted -is [bool] -and -not $backoffCompleted) {
         return @{ status = 'stopped'; retryCount = $retryCount; reasonCode = 'stop_requested' }
       }
-      & $EventAction 'backoff' 'completed' 'retry_delay_elapsed' $attempt $delay
+      & $EventAction 'backoff' 'completed' 'retry_delay_elapsed' $attempt $delay | Out-Null
     } else { $delay = 0 }
 
-    & $EventAction 'attempt' 'started' 'none' $attempt $delay
+    & $EventAction 'attempt' 'started' 'none' $attempt $delay | Out-Null
     try {
       & $StartAction
       if (-not (& $HealthAction)) { throw 'NODARIS_HEALTH_TIMEOUT' }
-      & $EventAction 'attempt' 'healthy' 'health_passed' $attempt $delay
+      & $EventAction 'attempt' 'healthy' 'health_passed' $attempt $delay | Out-Null
       return @{ status = 'healthy'; retryCount = $retryCount; reasonCode = 'health_passed' }
     } catch {
       $reasonCode = if ($_.Exception.Message -eq 'NODARIS_PORT_IN_USE') {
@@ -101,12 +101,12 @@ function Invoke-NodarisStartupPolicy {
         'process_start_failed'
       }
       & $StopAction
-      & $EventAction 'attempt' 'failed' $reasonCode $attempt $delay
+      & $EventAction 'attempt' 'failed' $reasonCode $attempt $delay | Out-Null
       if (& $StopRequestedAction) {
         return @{ status = 'stopped'; retryCount = $retryCount; reasonCode = 'stop_requested' }
       }
       if ($attempt -gt $MaxRetries) {
-        & $EventAction 'attempt' 'failed' 'circuit_open' $attempt 0
+        & $EventAction 'attempt' 'failed' 'circuit_open' $attempt 0 | Out-Null
         return @{ status = 'circuit_open'; retryCount = $retryCount; reasonCode = 'circuit_open' }
       }
       $retryCount++

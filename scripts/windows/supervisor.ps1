@@ -2,8 +2,66 @@
    SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0 #>
 
 $ErrorActionPreference = 'Stop'
+$script:startupTrace = [System.Collections.Generic.List[object]]::new()
+$script:startupTimer = [Diagnostics.Stopwatch]::StartNew()
+$script:scriptEntryUtc = [DateTime]::UtcNow
+$script:scriptEntryWatch = [Diagnostics.Stopwatch]::StartNew()
+
+function Add-StartupCheckpoint([string]$Stage, [string]$Status, [string]$ReasonCode, [DateTime]$TimestampUtc = [DateTime]::UtcNow, [long]$DurationMs = 0) {
+  $script:startupTrace.Add([pscustomobject]@{
+    component = 'supervisor'
+    stage = $Stage
+    status = $Status
+    reasonCode = $ReasonCode
+    timestampUtc = $TimestampUtc.ToUniversalTime().ToString('o')
+    durationMs = [Math]::Max(0, $DurationMs)
+  })
+}
+
+$processStartUtc = $null
+try { $processStartUtc = [Diagnostics.Process]::GetCurrentProcess().StartTime.ToUniversalTime() } catch { }
+if ($null -ne $processStartUtc) { Add-StartupCheckpoint 'process' 'started' 'process_created' $processStartUtc }
+if ($null -ne $processStartUtc) {
+  $processToEntryMs = [Math]::Max(0, [long]($script:scriptEntryUtc.Subtract($processStartUtc).TotalMilliseconds))
+  Add-StartupCheckpoint 'bootstrap' 'started' 'script_entry' $script:scriptEntryUtc $processToEntryMs
+} else {
+  Add-StartupCheckpoint 'bootstrap' 'started' 'script_entry' $script:scriptEntryUtc
+}
+$launcherEnteredUtc = $env:NODARIS_LAUNCHER_ENTERED_UTC
+$launchCallStartedUtc = $env:NODARIS_LAUNCH_CALL_STARTED_UTC
+foreach ($trace in @(@{ value = $launcherEnteredUtc; reason = 'launcher_entry' }, @{ value = $launchCallStartedUtc; reason = 'launch_call_started' })) {
+  if (-not [string]::IsNullOrWhiteSpace($trace.value) -and $trace.value -match '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$') {
+    $traceDate = [DateTime]::Parse($trace.value, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal)
+    $launcherDuration = 0
+    if ($trace.reason -eq 'launcher_entry' -and -not [string]::IsNullOrWhiteSpace($launchCallStartedUtc) -and $launchCallStartedUtc -match '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$') {
+      $callStartForDuration = [DateTime]::Parse($launchCallStartedUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal)
+      $launcherDuration = [Math]::Max(0, [long]($callStartForDuration.Subtract($traceDate).TotalMilliseconds))
+    }
+    Add-StartupCheckpoint 'bootstrap' 'started' $trace.reason $traceDate $launcherDuration
+  } elseif (-not [string]::IsNullOrWhiteSpace($trace.value)) {
+    Add-StartupCheckpoint 'bootstrap' 'failed' 'trace_timestamp_invalid'
+  }
+}
+if ([string]::IsNullOrWhiteSpace($launcherEnteredUtc) -or [string]::IsNullOrWhiteSpace($launchCallStartedUtc)) {
+  Add-StartupCheckpoint 'bootstrap' 'failed' 'early_trace_unavailable'
+}
+if ($null -ne $processStartUtc -and -not [string]::IsNullOrWhiteSpace($launchCallStartedUtc) -and $launchCallStartedUtc -match '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$') {
+  try {
+    $launchStarted = [DateTime]::Parse($launchCallStartedUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal)
+    $launchElapsed = [Math]::Max(0, [long]($processStartUtc.Subtract($launchStarted).TotalMilliseconds))
+    # O timestamp é o horário de criação do processo observado pelo PowerShell, não o retorno direto de WScript.Shell.Run.
+    Add-StartupCheckpoint 'bootstrap' 'healthy' 'process_creation_observed' $processStartUtc $launchElapsed
+  } catch { }
+}
+Remove-Item Env:NODARIS_LAUNCHER_ENTERED_UTC -ErrorAction SilentlyContinue
+Remove-Item Env:NODARIS_LAUNCH_CALL_STARTED_UTC -ErrorAction SilentlyContinue
+
 $taskName = 'Nodaris User Session'
+$resolveTimer = [Diagnostics.Stopwatch]::StartNew()
+Add-StartupCheckpoint 'bootstrap' 'started' 'project_path_resolve_started'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$resolveTimer.Stop()
+Add-StartupCheckpoint 'bootstrap' 'healthy' 'project_path_resolve_completed' ([DateTime]::UtcNow) $resolveTimer.ElapsedMilliseconds
 $localRoot = Join-Path $env:LOCALAPPDATA 'Nodaris'
 $stateRoot = Join-Path $localRoot 'supervisor'
 $stateFile = Join-Path $stateRoot 'state.json'
@@ -29,14 +87,32 @@ $lastAgentHealthReason = 'health_request_failed'
 $lastTunnelReadiness = 'unknown'
 $lastTunnelReadinessLogged = ''
 $startupPhase = 'configuration'
-$startupTimer = [Diagnostics.Stopwatch]::StartNew()
+$diagnosticsLoadTimer = [Diagnostics.Stopwatch]::StartNew()
+Add-StartupCheckpoint 'bootstrap' 'started' 'diagnostics_load_started'
 . $diagnosticsScript
+$diagnosticsLoadTimer.Stop()
+Add-StartupCheckpoint 'bootstrap' 'healthy' 'diagnostics_load_completed' ([DateTime]::UtcNow) $diagnosticsLoadTimer.ElapsedMilliseconds
+$lifecycleLoadTimer = [Diagnostics.Stopwatch]::StartNew()
+Add-StartupCheckpoint 'bootstrap' 'started' 'lifecycle_load_started'
 . $lifecycleScript
+$lifecycleLoadTimer.Stop()
+Add-StartupCheckpoint 'bootstrap' 'healthy' 'lifecycle_load_completed' ([DateTime]::UtcNow) $lifecycleLoadTimer.ElapsedMilliseconds
 
-function Write-Diagnostic([string]$Component, [string]$Stage, [string]$Status, [string]$ReasonCode, [int]$Attempt = 0, [long]$DurationMs = 0, [int]$TimeoutSeconds = -1, [int]$BackoffSeconds = -1) {
-  try {
-    Write-NodarisDiagnosticEvent -Path $diagnosticsFile -Component $Component -Stage $Stage -Status $Status -ReasonCode $ReasonCode -Attempt $Attempt -DurationMs $DurationMs -TimeoutSeconds $TimeoutSeconds -BackoffSeconds $BackoffSeconds
-  } catch { }
+function Flush-StartupTrace {
+  $firstWrite = $false
+  foreach ($trace in $script:startupTrace) {
+    $ok = $false
+    try {
+      Write-NodarisDiagnosticEvent -Path $diagnosticsFile -Component $trace.component -Stage $trace.stage -Status $trace.status -ReasonCode $trace.reasonCode -Attempt 0 -DurationMs $trace.durationMs -TimestampUtc $trace.timestampUtc
+      $ok = $true
+    } catch { $ok = $false }
+    if ($ok -and -not $firstWrite) {
+      $firstWrite = $true
+      Write-Diagnostic 'supervisor' 'telemetry' 'healthy' 'first_write_succeeded' 0 $script:scriptEntryWatch.ElapsedMilliseconds
+    }
+  }
+  $script:startupTrace.Clear()
+  return $firstWrite
 }
 
 function Write-State([string]$SupervisorStatus) {
@@ -321,17 +397,40 @@ function Restart-Child([string]$Name) {
 }
 
 try {
+  $mutexTimer = [Diagnostics.Stopwatch]::StartNew()
+  Add-StartupCheckpoint 'mutex' 'started' 'mutex_wait_started'
   if (-not $mutex.WaitOne(0)) {
+    $mutexTimer.Stop()
+    Add-StartupCheckpoint 'mutex' 'skipped' 'duplicate_instance' ([DateTime]::UtcNow) $mutexTimer.ElapsedMilliseconds
     try {
+      Add-StartupCheckpoint 'directory' 'started' 'state_directory_create_started'
       New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
+      Add-StartupCheckpoint 'directory' 'healthy' 'state_directory_created'
+      Add-StartupCheckpoint 'directory' 'started' 'directory_acl_started'
       Set-NodarisPrivateDirectoryAcl $stateRoot
+      if (Test-NodarisPrivateDirectoryAcl $stateRoot) {
+        Add-StartupCheckpoint 'directory' 'healthy' 'directory_acl_protected'
+        Flush-StartupTrace | Out-Null
+      }
       Write-Diagnostic 'supervisor' 'lifecycle' 'skipped' 'duplicate_instance' 1
     } catch { }
     exit 0
   }
+  $mutexTimer.Stop()
+  Add-StartupCheckpoint 'mutex' 'healthy' 'mutex_acquired' ([DateTime]::UtcNow) $mutexTimer.ElapsedMilliseconds
+  $directoryTimer = [Diagnostics.Stopwatch]::StartNew()
+  Add-StartupCheckpoint 'directory' 'started' 'state_directory_create_started'
   New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
+  $directoryTimer.Stop()
+  Add-StartupCheckpoint 'directory' 'healthy' 'state_directory_created' ([DateTime]::UtcNow) $directoryTimer.ElapsedMilliseconds
+  $aclTimer = [Diagnostics.Stopwatch]::StartNew()
+  Add-StartupCheckpoint 'directory' 'started' 'directory_acl_started'
   Set-NodarisPrivateDirectoryAcl $stateRoot
-  Write-Diagnostic 'supervisor' 'lifecycle' 'started' 'mutex_acquired' 1
+  if (-not (Test-NodarisPrivateDirectoryAcl $stateRoot)) { throw 'ACL local de telemetria não pôde ser validada.' }
+  $aclTimer.Stop()
+  Add-StartupCheckpoint 'directory' 'healthy' 'directory_acl_protected' ([DateTime]::UtcNow) $aclTimer.ElapsedMilliseconds
+  Flush-StartupTrace | Out-Null
+  Write-Diagnostic 'supervisor' 'lifecycle' 'started' 'mutex_acquired' 1 $mutexTimer.ElapsedMilliseconds
   $startupPhase = 'configuration'
   $configurationTimer = [Diagnostics.Stopwatch]::StartNew()
   Write-Diagnostic 'configuration' 'configuration' 'started' 'none' 1

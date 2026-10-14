@@ -18,6 +18,41 @@ function Set-NodarisPrivateDirectoryAcl([string]$Path) {
   [IO.Directory]::SetAccessControl($Path, $directoryAcl)
 }
 
+function Test-NodarisPrivateDirectoryAcl([string]$Path) {
+  try {
+    $acl = [IO.Directory]::GetAccessControl($Path)
+    if (-not $acl.AreAccessRulesProtected) { return $false }
+    $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $expected = @($currentSid, 'S-1-5-18') | Sort-Object
+    $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+    if ($rules.Count -ne 2) { return $false }
+    $actual = @()
+    foreach ($rule in $rules) {
+      if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { return $false }
+      if (($rule.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -ne [Security.AccessControl.FileSystemRights]::FullControl) { return $false }
+      $actual += $rule.IdentityReference.Value
+    }
+    return (($actual | Sort-Object) -join ',') -eq ($expected -join ',')
+  } catch { return $false }
+}
+
+function Test-NodarisPrivateFileAcl([string]$Path) {
+  try {
+    $acl = [IO.File]::GetAccessControl($Path)
+    $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $expected = @($currentSid, 'S-1-5-18') | Sort-Object
+    $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+    if ($rules.Count -ne 2) { return $false }
+    $actual = @()
+    foreach ($rule in $rules) {
+      if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { return $false }
+      if (($rule.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -ne [Security.AccessControl.FileSystemRights]::FullControl) { return $false }
+      $actual += $rule.IdentityReference.Value
+    }
+    return (($actual | Sort-Object) -join ',') -eq ($expected -join ',')
+  } catch { return $false }
+}
+
 function Test-NodarisTunnelReadiness($Health, [ref]$ReasonCode) {
   $ReasonCode.Value = 'control_plane_unreported'
   if ($null -eq $Health -or $Health.live -ne $true) {
@@ -69,22 +104,30 @@ function Write-NodarisDiagnosticEvent {
   param(
     [Parameter(Mandatory = $true)][string]$Path,
     [Parameter(Mandatory = $true)][ValidateSet('supervisor', 'configuration', 'agent', 'gateway', 'tunnel')][string]$Component,
-    [Parameter(Mandatory = $true)][ValidateSet('lifecycle', 'configuration', 'attempt', 'process', 'health', 'backoff', 'readiness', 'recovery')][string]$Stage,
+    [Parameter(Mandatory = $true)][ValidateSet('lifecycle', 'configuration', 'attempt', 'process', 'health', 'backoff', 'readiness', 'recovery', 'bootstrap', 'mutex', 'directory', 'telemetry')][string]$Stage,
     [Parameter(Mandatory = $true)][ValidateSet('started', 'healthy', 'ready', 'failed', 'timeout', 'scheduled', 'completed', 'skipped', 'stopped')][string]$Status,
-    [Parameter(Mandatory = $true)][ValidateSet('none', 'mutex_acquired', 'duplicate_instance', 'configuration_valid', 'configuration_invalid', 'process_started', 'port_in_use', 'process_start_failed', 'health_passed', 'health_timeout', 'health_request_failed', 'health_unhealthy', 'health_http_unauthorized', 'health_http_error', 'health_transport_error', 'local_listener_unavailable', 'control_plane_not_polling', 'poll_not_yet_succeeded', 'poll_stale', 'poll_current', 'poll_timestamp_invalid', 'poll_window_invalid', 'control_plane_unreported', 'client_not_live', 'client_not_ready', 'retry_scheduled', 'retry_delay_elapsed', 'circuit_open', 'process_exited', 'stop_requested', 'startup_failed')][string]$ReasonCode,
+    [Parameter(Mandatory = $true)][ValidateSet('none', 'mutex_acquired', 'duplicate_instance', 'configuration_valid', 'configuration_invalid', 'process_started', 'port_in_use', 'process_start_failed', 'health_passed', 'health_timeout', 'health_request_failed', 'health_unhealthy', 'health_http_unauthorized', 'health_http_error', 'health_transport_error', 'local_listener_unavailable', 'control_plane_not_polling', 'poll_not_yet_succeeded', 'poll_stale', 'poll_current', 'poll_timestamp_invalid', 'poll_window_invalid', 'control_plane_unreported', 'client_not_live', 'client_not_ready', 'retry_scheduled', 'retry_delay_elapsed', 'circuit_open', 'process_exited', 'stop_requested', 'startup_failed', 'launcher_entry', 'launch_call_started', 'launch_call_returned', 'process_created', 'process_creation_observed', 'script_entry', 'project_path_resolve_started', 'project_path_resolve_completed', 'diagnostics_load_started', 'diagnostics_load_completed', 'lifecycle_load_started', 'lifecycle_load_completed', 'mutex_wait_started', 'state_directory_create_started', 'state_directory_created', 'directory_acl_started', 'directory_acl_protected', 'early_trace_unavailable', 'first_write_succeeded', 'trace_timestamp_invalid', 'trace_spool_invalid')][string]$ReasonCode,
     [Parameter(Mandatory = $true)][int]$Attempt,
     [long]$DurationMs = 0,
     [int]$TimeoutSeconds = -1,
-    [int]$BackoffSeconds = -1
+    [int]$BackoffSeconds = -1,
+    [string]$TimestampUtc = ''
   )
 
   $directory = Split-Path -Parent $Path
   if (-not (Test-Path -LiteralPath $directory -PathType Container)) { throw 'Diretório local de diagnóstico indisponível.' }
   $maxFileBytes = 262144
   $maxRotations = 3
+  if (-not (Test-NodarisPrivateDirectoryAcl $directory)) { throw 'ACL do diretório de diagnóstico não está restrita.' }
+  if ((Test-Path -LiteralPath $Path -PathType Leaf) -and -not (Test-NodarisPrivateFileAcl $Path)) { throw 'ACL do arquivo de diagnóstico não está restrita.' }
+  $eventTime = [DateTime]::UtcNow
+  if (-not [string]::IsNullOrWhiteSpace($TimestampUtc)) {
+    if ($TimestampUtc -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,7})?Z$') { throw 'Timestamp de diagnóstico inválido.' }
+    $eventTime = [DateTime]::Parse($TimestampUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal)
+  }
   $entry = [ordered]@{
     schemaVersion = 1
-    timestampUtc = [DateTime]::UtcNow.ToString('o')
+    timestampUtc = $eventTime.ToString('o')
     durationMs = [Math]::Max(0, $DurationMs)
     component = $Component
     stage = $Stage
@@ -119,4 +162,10 @@ function Write-NodarisDiagnosticEvent {
     $fileAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($systemSid, 'FullControl', 'Allow'))
     [IO.File]::SetAccessControl($Path, $fileAcl)
   }
+}
+
+function Write-Diagnostic([string]$Component, [string]$Stage, [string]$Status, [string]$ReasonCode, [int]$Attempt = 0, [long]$DurationMs = 0, [int]$TimeoutSeconds = -1, [int]$BackoffSeconds = -1) {
+  try {
+    Write-NodarisDiagnosticEvent -Path $script:diagnosticsFile -Component $Component -Stage $Stage -Status $Status -ReasonCode $ReasonCode -Attempt $Attempt -DurationMs $DurationMs -TimeoutSeconds $TimeoutSeconds -BackoffSeconds $BackoffSeconds | Out-Null
+  } catch { }
 }

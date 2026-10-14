@@ -18,6 +18,12 @@ describe("inicialização invisível do Windows", () => {
     expect(launcher).toContain("shell.Run commandLine, 0, False");
     expect(launcher).toContain("-WindowStyle Hidden");
     expect(launcher).toContain("supervisor.ps1");
+    expect(launcher.indexOf("NODARIS_LAUNCHER_ENTERED_UTC")).toBeLessThan(
+      launcher.indexOf("shell.Run commandLine")
+    );
+    expect(launcher.indexOf("NODARIS_LAUNCH_CALL_STARTED_UTC")).toBeLessThan(
+      launcher.indexOf("shell.Run commandLine")
+    );
     expect(launcher).not.toMatch(/NODARIS_TOKEN|Bearer|runtime.?key|api.?key/i);
   });
 
@@ -50,6 +56,7 @@ describe("inicialização invisível do Windows", () => {
   });
 
   it("distingue health local do polling recente no plano de controle", async () => {
+    const launcher = await readFile(launcherPath, "utf8");
     const manager = await readFile(managerPath, "utf8");
     const supervisor = await readFile(supervisorPath, "utf8");
     const diagnostics = await readFile(diagnosticsPath, "utf8");
@@ -59,6 +66,26 @@ describe("inicialização invisível do Windows", () => {
     expect(supervisor).toContain("Test-NodarisTunnelReadiness");
     expect(supervisor).toContain("health?details=true");
     expect(supervisor).toContain("startup-events.jsonl");
+    expect(supervisor).toContain("project_path_resolve_started");
+    expect(supervisor).toContain("diagnostics_load_started");
+    expect(supervisor).toContain("lifecycle_load_started");
+    expect(supervisor).toContain("mutex_wait_started");
+    expect(supervisor).toContain("directory_acl_started");
+    expect(supervisor).toContain("first_write_succeeded");
+    expect(supervisor).toContain("process_creation_observed");
+    expect(supervisor).not.toContain("launch_call_returned");
+    expect(supervisor.indexOf("script_entry")).toBeLessThan(
+      supervisor.indexOf("project_path_resolve_started")
+    );
+    expect(supervisor.indexOf("diagnostics_load_started")).toBeLessThan(
+      supervisor.indexOf("mutex_wait_started")
+    );
+    expect(supervisor.indexOf("mutex_wait_started")).toBeLessThan(
+      supervisor.indexOf("state_directory_create_started")
+    );
+    expect(supervisor.indexOf("directory_acl_started")).toBeLessThan(
+      supervisor.indexOf("Flush-StartupTrace | Out-Null")
+    );
     expect(supervisor).toContain("Invoke-NodarisRecoveryPolicy");
     expect(supervisor).toContain("Stop-NodarisChildrenInOrder");
     expect(supervisor).toContain("@('--import', 'tsx'");
@@ -71,7 +98,15 @@ describe("inicialização invisível do Windows", () => {
     expect(diagnostics).toContain("durationMs =");
     expect(diagnostics).toContain("timeoutSeconds =");
     expect(diagnostics).toContain("backoffSeconds =");
+    expect(diagnostics).toContain("Test-NodarisPrivateDirectoryAcl");
+    expect(diagnostics).toContain("Test-NodarisPrivateFileAcl");
+    expect(diagnostics).toContain("function Write-Diagnostic");
+    expect(diagnostics).toContain("| Out-Null");
+    expect(diagnostics).toContain("TimestampUtc");
     expect(diagnostics).not.toMatch(/CommandLine|NODARIS_TOKEN|Authorization|Exception\.Message/i);
+    expect(launcher).toContain("NODARIS_LAUNCHER_ENTERED_UTC");
+    expect(launcher).toContain("NODARIS_LAUNCH_CALL_STARTED_UTC");
+    expect(launcher).not.toMatch(/NODARIS_TOKEN|Bearer|Authorization|api.?key/i);
   });
 
   it.skipIf(process.platform !== "win32")(

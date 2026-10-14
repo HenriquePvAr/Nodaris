@@ -117,9 +117,15 @@ Latências derivadas: 28s entre o horário registrado da tarefa e início do sup
 
 ## Observabilidade M01.9
 
-Os eventos são gravados em `%LOCALAPPDATA%\Nodaris\supervisor\startup-events.jsonl`, mais três arquivos rotacionados, limitados a 256 KiB cada. ACL protegida: usuário atual e SYSTEM. O JSONL registra timestamp UTC, duração, componente, estágio, tentativa, timeout, backoff, status e motivo enumerado. Mensagens de exceção, linhas de comando, PIDs, credenciais e conteúdo de projeto são excluídos.
+Os eventos são gravados em `%LOCALAPPDATA%\Nodaris\supervisor\startup-events.jsonl`, mais três arquivos rotacionados, limitados a 256 KiB cada. ACL protegida: usuário atual e SYSTEM. O JSONL registra timestamp UTC, duração, componente, estágio, tentativa, timeout, backoff, status e motivo enumerado. Mensagens de exceção, linhas de comando, PIDs, credenciais e conteúdo de projeto são excluídos. A gravação exige ACL privada validada para o diretório e para um arquivo já existente; sem essa validação, o evento é descartado em vez de criar uma trilha insegura.
 
-O fixture Windows `tests/fixtures/windows/diagnostics-smoke.ps1` cobre tentativa falha, backoff agendado, saúde do túnel pendente/pronto/obsoleto, rejeição de motivos livres, sanitização do schema, rotação e ACL. Isso não inicia agente/gateway/túnel reais. Para coletar a causa dos 2min43s, aguardar a próxima inicialização natural e analisar transições `process`, `health`, `backoff` e `readiness`; não reiniciar o PC, serviço ou rede para gerar a amostra.
+O fixture Windows `tests/fixtures/windows/diagnostics-smoke.ps1` cobre tentativa falha, backoff agendado, saúde do túnel pendente/pronto/obsoleto, rejeição de motivos livres, sanitização do schema, rotação e ACL. Isso não inicia agente/gateway/túnel reais.
+
+### Instrumentação precoce M01.12.1
+
+A instrumentação bufferiza checkpoints em memória desde a primeira instrução PowerShell e só os persiste depois de criar/preparar o diretório e confirmar a ACL privada. Ela registra a criação do processo PowerShell, entrada no script, resolução do repositório, carga dos scripts de diagnóstico e ciclo de vida, mutex, diretório/ACL, primeiro write bem-sucedido, inicialização dos serviços e primeira readiness `READY`. O launcher fornece timestamps UTC de entrada e pré-chamada por variáveis transitórias. `process_creation_observed` registra o horário de criação do processo PowerShell observado pelo próprio processo; sua duração é calculada desde a pré-chamada do launcher e não mede diretamente o retorno de `WScript.Shell.Run`. Nenhuma variável de telemetria é herdada pelos filhos do Nodaris.
+
+Na próxima inicialização natural, preservar o `startup-events.jsonl` e as rotações. Correlacionar os eventos por `timestampUtc` — a ordem física das linhas pode diferir da ordem temporal, pois checkpoints anteriores são gravados em lote após a ACL. Comparar `process/process_created`, `bootstrap/script_entry`, `bootstrap/project_path_resolve_*`, `bootstrap/*_load_*`, `mutex/*`, `directory/*`, `agent/process`, `supervisor/lifecycle/healthy` e `tunnel/readiness/ready`. Se a pasta estiver ausente ou a ACL não puder ser validada, nenhuma trilha precoce será gravada; ausência de evento não prova ausência de execução. Não reiniciar o PC, serviços ou rede para produzir a amostra.
 
 ## Cenário B — perda e restauração de internet
 
