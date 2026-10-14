@@ -195,6 +195,8 @@ export class ProjectStore {
     )
       throw new Error("Caminho inválido.");
     const segments = relativePath.replaceAll("\\", "/").split("/");
+    if (process.platform === "win32" && segments.some((part) => part.includes(":")))
+      throw new Error("Fluxos de dados alternativos NTFS não são permitidos.");
     if (
       segments.some(
         (part) =>

@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: 2026 Henrique Paiva Araujo
 // SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { ProjectStore } from "../packages/core/src/filesystem.js";
+import { loadConfig } from "../packages/core/src/config.js";
 import { gitDiff, gitLog, gitStatus } from "../packages/core/src/git.js";
 
 const exec = promisify(execFile);
@@ -23,6 +24,58 @@ afterEach(async () => {
       .splice(0)
       .map((directory) => rm(directory, { recursive: true, force: true }))
   );
+});
+
+describe("bind local obrigatório", () => {
+  const baseEnv: NodeJS.ProcessEnv = { NODARIS_TOKEN: "a".repeat(64) };
+
+  it("aceita o endereço IPv4 literal de loopback por padrão e explicitamente", () => {
+    const defaults = loadConfig(baseEnv);
+    expect(defaults.gatewayHost).toBe("127.0.0.1");
+    expect(defaults.agentHost).toBe("127.0.0.1");
+    expect(
+      loadConfig({ ...baseEnv, GATEWAY_HOST: "127.0.0.1", AGENT_HOST: "127.0.0.1" })
+    ).toMatchObject({ gatewayHost: "127.0.0.1", agentHost: "127.0.0.1" });
+  });
+
+  it.each([
+    "0.0.0.0",
+    "::",
+    "::1",
+    "localhost",
+    "192.0.2.10",
+    "10.0.0.5",
+    "127.0.0.2",
+    "::ffff:127.0.0.1",
+    " 127.0.0.1"
+  ])("rejeita bind não autorizado: %s", (host) => {
+    expect(() => loadConfig({ ...baseEnv, GATEWAY_HOST: host })).toThrow();
+    expect(() => loadConfig({ ...baseEnv, AGENT_HOST: host })).toThrow();
+  });
+
+  it("faz agente e gateway validarem configuração antes de criar listeners", async () => {
+    const agentSource = await readFile(
+      new URL("../apps/agent/src/index.ts", import.meta.url),
+      "utf8"
+    );
+    const gatewaySource = await readFile(
+      new URL("../apps/gateway/src/index.ts", import.meta.url),
+      "utf8"
+    );
+
+    expect(agentSource.indexOf("const config = loadConfig()")).toBeLessThan(
+      agentSource.indexOf("const server = createServer")
+    );
+    expect(agentSource.indexOf("const config = loadConfig()")).toBeLessThan(
+      agentSource.indexOf("server.listen(")
+    );
+    expect(gatewaySource.indexOf("const config = loadConfig()")).toBeLessThan(
+      gatewaySource.indexOf("const http = createServer")
+    );
+    expect(gatewaySource.indexOf("const config = loadConfig()")).toBeLessThan(
+      gatewaySource.indexOf("http.listen(")
+    );
+  });
 });
 
 describe("isolamento do filesystem", () => {
@@ -85,6 +138,50 @@ describe("isolamento do filesystem", () => {
       await expect(store.readText(project.id, "link.txt")).rejects.toThrow();
     }
   });
+
+  it.skipIf(process.platform !== "win32")(
+    "rejeita Alternate Data Streams NTFS antes de leitura, árvore e pesquisa",
+    async ({ skip }) => {
+      const root = await tempDir();
+      const projectPath = path.join(root, "app");
+      await mkdir(projectPath);
+      await writeFile(path.join(projectPath, "package.json"), "{}");
+      await writeFile(path.join(projectPath, "README.md"), "consulta segura\n");
+      const streamPath = path.join(projectPath, "README.md:nodaris-ads-fixture");
+      try {
+        await writeFile(streamPath, "conteudo-ads-fixture\n");
+        expect(await readFile(streamPath, "utf8")).toContain("conteudo-ads-fixture");
+      } catch {
+        skip("O filesystem temporário não permite criar Alternate Data Streams NTFS.");
+        return;
+      }
+
+      const store = await ProjectStore.create([root], "ads-test");
+      const project = (await store.discover())[0]!;
+      const variants = [
+        "README.md:nodaris-ads-fixture",
+        "README.md::$DATA",
+        "nested\\README.md:nodaris-ads-fixture",
+        "nested/README.md:nodaris-ads-fixture",
+        "nested\\..\\README.md:nodaris-ads-fixture"
+      ];
+      for (const relativePath of variants) {
+        await expect(store.resolveFile(project.id, relativePath)).rejects.toThrow(
+          /fluxos de dados alternativos/i
+        );
+        await expect(store.readText(project.id, relativePath)).rejects.toThrow(
+          /fluxos de dados alternativos/i
+        );
+        await expect(store.tree(project.id, relativePath)).rejects.toThrow(
+          /fluxos de dados alternativos/i
+        );
+      }
+      await expect(store.readText(project.id, "README.md")).resolves.toContain("consulta segura");
+      await expect(store.search(project.id, "conteudo-ads-fixture", 10)).resolves.toEqual([]);
+      await expect(store.search(project.id, "consulta segura", 10)).resolves.toHaveLength(1);
+    },
+    10_000
+  );
 });
 
 describe("consultas Git", () => {

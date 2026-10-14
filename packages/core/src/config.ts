@@ -9,9 +9,15 @@ const schema = z.object({
     .min(32, "Defina NODARIS_TOKEN com pelo menos 32 caracteres aleatórios."),
   NODARIS_ALLOWED_ROOTS: z.string().default(""),
   NODARIS_MACHINE_ID: z.string().min(1).default("local"),
-  GATEWAY_HOST: z.string().default("127.0.0.1"),
+  GATEWAY_HOST: z
+    .string()
+    .refine((host) => host === "127.0.0.1", "GATEWAY_HOST deve ser 127.0.0.1.")
+    .default("127.0.0.1"),
   GATEWAY_PORT: z.coerce.number().int().min(1).max(65535).default(3333),
-  AGENT_HOST: z.string().default("127.0.0.1"),
+  AGENT_HOST: z
+    .string()
+    .refine((host) => host === "127.0.0.1", "AGENT_HOST deve ser 127.0.0.1.")
+    .default("127.0.0.1"),
   AGENT_PORT: z.coerce.number().int().min(1).max(65535).default(3334)
 });
 
