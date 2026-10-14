@@ -1,10 +1,12 @@
-# Configuração local de raízes autorizadas — preparação M01.12.2B1
+# Configuração local de raízes autorizadas — M01.12.2B
 
 ## Estado
 
-O leitor abaixo é uma preparação isolada. `scripts/windows/supervisor.ps1` continua usando a política atual e não carrega `local-roots.ps1`. Nenhum arquivo real em `%LOCALAPPDATA%` foi criado, lido ou alterado nesta etapa. A raiz Dell já autorizada não foi migrada.
+O leitor `scripts/windows/local-roots.ps1` está integrado ao código do supervisor após o mutex e durante a fase de configuração, antes de iniciar qualquer serviço. O processo supervisor atualmente ativo foi carregado antes desta alteração e continua em execução com a política que já tinha carregado; a nova integração ainda não foi ativada nem validada em uma inicialização real.
 
-## Caminho e schema propostos
+Neste computador, a configuração privada foi provisionada fora do Git e validada pelo leitor no Windows PowerShell 5.1. Ela contém exatamente uma raiz previamente autorizada. Não registre seu conteúdo ou caminho na telemetria. Esta autorização não se transfere a outras instalações ou computadores.
+
+## Caminho e schema
 
 O caminho padrão futuro é `%LOCALAPPDATA%\Nodaris\config\allowed-roots.json`. O arquivo UTF-8 deve conter exatamente as propriedades abaixo:
 
@@ -32,25 +34,24 @@ São aceitas de 1 a 32 raízes. O leitor não cria diretórios/arquivos e não o
 
 O formato usa caminhos Windows absolutos, conforme o escopo deste módulo. A ACL é verificada via Windows PowerShell 5.1 e APIs NTFS. O teste de junction exige criar o reparse point em fixture e falha (em vez de declarar PASS) se a política local impedir a criação. O teste também confirma a regra de elegibilidade: uma raiz igual ao diretório de instalação não é classificada como ampliação; seu pai é.
 
-## Ativação futura (M01.12.2B2 — não executada)
+## Próxima adoção (pendente de autorização)
 
-1. Revisar e aprovar este módulo e o schema antes de qualquer mudança no supervisor.
-2. Com os serviços atuais ainda intactos, preparar a configuração real fora do Git com a raiz exata previamente autorizada pelo proprietário neste computador; não copiar essa autorização para outras máquinas. Criar diretório/arquivo com ACL protegida de usuário atual e SYSTEM e persistir o arquivo atomicamente. Essa criação exige autorização específica na etapa de ativação.
-3. Executar o leitor em modo somente leitura contra o arquivo real e confirmar o único caminho canônico retornado. Não imprimir conteúdo, nem emitir caminhos em logs.
-4. Confirmar antes de editar o startup que a configuração foi criada, ACLs conferem e a leitura é válida. Se falhar, parar e reparar o arquivo local antes de ativar; jamais reintroduzir fallback amplo.
-5. Alterar o supervisor para carregar o módulo e validar a configuração antes de definir `NODARIS_ALLOWED_ROOTS`. A alteração em disco não afeta processos já carregados; manter esses processos ativos e programar a adoção para inicialização natural aprovada, sem parar/reiniciar nesta preparação.
-6. Antes da próxima inicialização natural, fazer revisão estática/testes isolados do startup e deixar procedimento manual para restaurar o código anterior se a nova execução falhar. A configuração válida deve permanecer presente; rollback não deve ampliar raízes nem usar uma allowlist embutida.
-7. Após a inicialização futura, confirmar health e que projetos listados limitam-se à raiz aprovada; tentar um caminho externo e comprovar rejeição. Não declarar ativação até validação MCP real.
-8. Em segundo computador, criar uma configuração nova após autorização explícita do proprietário local. Nunca copiar a allowlist Dell.
+1. Antes da janela, confirmar que o código revisado e a configuração privada são compatíveis, que o runtime antigo permanece saudável e que a lista MCP mostra somente a raiz aprovada.
+2. Comparar supervisor, agente, gateway e tunnel-client antes e depois da adoção; confirmar ausência de duplicatas e listeners exclusivamente em loopback.
+3. Após uma inicialização natural expressamente autorizada, confirmar health autenticado, readiness do túnel e eventos sanitizados de carregamento e validação das raízes.
+4. Validar novamente a lista de projetos e fazer uma tentativa negativa de consulta fora da raiz aprovada. Não imprimir conteúdo ou caminho privado em relatórios.
+5. Não iniciar supervisor paralelo. Se a nova inicialização falhar, preservar o estado, consultar `state.json` e eventos sanitizados e interromper a adoção. Não criar raízes, alterar ACLs, modificar o leitor ou ativar uma allowlist alternativa para contornar a falha.
+6. Recuperação manual: com autorização específica, restaurar a versão previamente revisada do supervisor ou corrigir a configuração local por procedimento igualmente revisado; verificar o diff e preservar a configuração privada. Só então usar o mecanismo oficial de inicialização em janela aprovada. Nenhum fallback automático está implementado.
+7. Em outro computador, exigir autorização própria e provisionamento local independente; nunca copiar a configuração deste equipamento.
 
 ### Bloqueio operacional
 
-Como o Nodaris é iniciado pelo Agendador e está em uso, não é seguro provar uma alteração de startup interrompendo a instância atual. A B2 deve separar preparação da configuração, revisão do código e adoção na próxima inicialização autorizada. Se a instância antiga continuar disponível após essa adoção, ela manterá a política em memória até sair; não iniciar um supervisor paralelo.
+Como o Nodaris é iniciado pelo Agendador e está em uso, alterações no arquivo do supervisor não modificam o processo carregado na memória. A integração está apenas no código em disco; a política da instância ativa permanece inalterada até uma inicialização futura autorizada. Não parar serviços, alterar a tarefa ou iniciar supervisor paralelo nesta etapa.
 
 ## Recuperação
 
-Se a configuração falhar antes da adoção, manter o supervisor atual intacto e corrigir a fixture/configuração fora do runtime. Se uma futura inicialização com o novo leitor falhar, não permitir nenhum projeto e não iniciar cópia paralela; preservar diagnóstico sanitizado, revisar ACL/schema e corrigir a configuração autorizada. O rollback de código só pode restaurar a política anteriormente revisada, mantendo a raiz Dell estrita; não criar fallback automático para diretórios mais amplos. A execução concreta desse rollback pertence à missão de ativação e requer autorização específica.
+Se a configuração falhar antes da adoção, manter o supervisor atual intacto e corrigir fixtures fora do runtime. Se uma inicialização futura falhar, o leitor bloqueia o startup antes de iniciar componentes e remove `NODARIS_ALLOWED_ROOTS`, sem recorrer ao caminho fixo antigo. Preservar os diagnósticos sanitizados e a configuração; não iniciar cópia paralela. Qualquer restauração de código ou correção da configuração exige autorização e revisão próprias. O achado M12-07 — falha durante cleanup poder impedir a gravação final do estado — permanece fora do escopo desta etapa e não foi corrigido nem retestado.
 
 ## Testes e limites desta etapa
 
-`tests/fixtures/windows/local-roots-smoke.ps1` usa uma pasta temporária, com ACL fixture, e não consulta `%LOCALAPPDATA%\Nodaris\config`. A suíte também verifica estaticamente que o supervisor não carrega nem chama o leitor. Os testes não modificam tarefa agendada, serviços, segredos, allowlist ativa ou processos.
+`tests/fixtures/windows/local-roots-smoke.ps1` valida o leitor em uma pasta temporária. `tests/fixtures/windows/supervisor-roots-smoke.ps1` extrai e executa somente as funções de integração do supervisor, com configurações temporárias e diagnóstico simulado; nunca executa o supervisor real nem consulta a configuração privada. Os testes não modificam tarefa agendada, serviços, credenciais, configuração real ou processos.

@@ -55,6 +55,7 @@ if ($null -ne $processStartUtc -and -not [string]::IsNullOrWhiteSpace($launchCal
 }
 Remove-Item Env:NODARIS_LAUNCHER_ENTERED_UTC -ErrorAction SilentlyContinue
 Remove-Item Env:NODARIS_LAUNCH_CALL_STARTED_UTC -ErrorAction SilentlyContinue
+Remove-Item Env:NODARIS_ALLOWED_ROOTS -ErrorAction SilentlyContinue
 
 $taskName = 'Nodaris User Session'
 $resolveTimer = [Diagnostics.Stopwatch]::StartNew()
@@ -74,7 +75,6 @@ $profileFile = Join-Path $localRoot 'tunnel-client\profiles\nodaris-local.yaml'
 $tunnelExe = Join-Path $localRoot 'tunnel-client\v0.0.15\tunnel-client.exe'
 $nodeExe = $null
 $tsxModule = Join-Path $repoRoot 'node_modules\tsx'
-$approvedRoot = 'C:\Users\Dell\Downloads\Nodaris'
 $maxRestarts = 5
 $mutex = [Threading.Mutex]::new($false, 'LocalNodaris-M01-Supervisor')
 $children = @{}
@@ -277,6 +277,58 @@ function Wait-NodarisBackoff([int]$Seconds) {
   return -not (Test-Path -LiteralPath $stopFile)
 }
 
+function Get-NodarisAllowedRootsValue($Configuration) {
+  try {
+    if ($null -eq $Configuration) { throw 'invalid' }
+    $propertyNames = @($Configuration.PSObject.Properties.Name)
+    if ($propertyNames.Count -ne 2 -or -not ($propertyNames -ccontains 'schemaVersion') -or -not ($propertyNames -ccontains 'allowedRoots')) { throw 'invalid' }
+    if (($Configuration.schemaVersion -isnot [int] -and $Configuration.schemaVersion -isnot [long]) -or $Configuration.schemaVersion -ne 1) { throw 'invalid' }
+    if ($Configuration.allowedRoots -isnot [Array] -or $Configuration.allowedRoots.Count -lt 1 -or $Configuration.allowedRoots.Count -gt 32) { throw 'invalid' }
+
+    $validatedRoots = [Collections.Generic.List[string]]::new()
+    foreach ($candidate in $Configuration.allowedRoots) {
+      if ($candidate -isnot [string] -or [string]::IsNullOrWhiteSpace($candidate) -or $candidate.Contains(';')) { throw 'invalid' }
+      if ($candidate -notmatch '^[A-Za-z]:\\' -or $candidate.Contains('/') -or $candidate.Substring(2).Contains(':')) { throw 'invalid' }
+      $canonicalRoot = [IO.Path]::GetFullPath($candidate)
+      if (-not $canonicalRoot.Equals($candidate, [StringComparison]::OrdinalIgnoreCase)) { throw 'invalid' }
+      if (-not (Test-Path -LiteralPath $canonicalRoot -PathType Container) -or -not (Test-NodarisNoReparseComponents $canonicalRoot)) { throw 'invalid' }
+      if (Test-NodarisRootWouldBroadenInstall $canonicalRoot) { throw 'invalid' }
+      foreach ($existing in $validatedRoots) {
+        $existingPrefix = $existing.TrimEnd('\') + '\'
+        $candidatePrefix = $canonicalRoot.TrimEnd('\') + '\'
+        if ($canonicalRoot.Equals($existing, [StringComparison]::OrdinalIgnoreCase) -or
+            $canonicalRoot.StartsWith($existingPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+            $existing.StartsWith($candidatePrefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'invalid' }
+      }
+      $validatedRoots.Add($canonicalRoot)
+    }
+    return ($validatedRoots -join ';')
+  } catch {
+    throw 'NODARIS_ROOT_CONFIG_REJECTED'
+  }
+}
+
+function Initialize-NodarisAllowedRoots([string]$ReaderScriptPath, [string]$ConfigPath) {
+  $timer = [Diagnostics.Stopwatch]::StartNew()
+  Remove-Item Env:NODARIS_ALLOWED_ROOTS -ErrorAction SilentlyContinue
+  try {
+    if ([string]::IsNullOrWhiteSpace($ReaderScriptPath) -or [string]::IsNullOrWhiteSpace($ConfigPath) -or
+        -not (Test-Path -LiteralPath $ReaderScriptPath -PathType Leaf)) { throw 'NODARIS_ROOT_CONFIG_REJECTED' }
+    . $ReaderScriptPath
+    $readerResults = @(Read-NodarisLocalRoots -Path $ConfigPath)
+    if ($readerResults.Count -ne 1) { throw 'NODARIS_ROOT_CONFIG_REJECTED' }
+    $allowedRootsValue = Get-NodarisAllowedRootsValue $readerResults[0]
+    $env:NODARIS_ALLOWED_ROOTS = $allowedRootsValue
+    $timer.Stop()
+    Write-Diagnostic 'configuration' 'configuration' 'healthy' 'configuration_valid' 1 $timer.ElapsedMilliseconds
+  } catch {
+    Remove-Item Env:NODARIS_ALLOWED_ROOTS -ErrorAction SilentlyContinue
+    $timer.Stop()
+    Write-Diagnostic 'configuration' 'configuration' 'failed' 'configuration_invalid' 1 $timer.ElapsedMilliseconds
+    throw 'NODARIS_ROOT_CONFIG_REJECTED'
+  }
+}
+
 function Start-Stack {
   $startActions = @{
     agent = { Start-Child 'agent' $nodeExe @('--import', 'tsx', (Join-Path $repoRoot 'apps\agent\src\index.ts')) 3334 }
@@ -441,10 +493,12 @@ try {
   if (-not (Test-Path -LiteralPath $tsxModule -PathType Container)) { throw 'Dependência local do agente indisponível; consulte o status sem divulgar segredos.' }
   $env:NODARIS_TOKEN = [IO.File]::ReadAllText($tokenFile).Trim()
   if ($env:NODARIS_TOKEN.Length -lt 32) { throw 'O arquivo Bearer local está vazio ou inválido.' }
+  $rootsReaderScript = Join-Path $PSScriptRoot 'local-roots.ps1'
+  $rootsConfigPath = Join-Path $env:LOCALAPPDATA 'Nodaris\config\allowed-roots.json'
+  Initialize-NodarisAllowedRoots -ReaderScriptPath $rootsReaderScript -ConfigPath $rootsConfigPath
   $configurationTimer.Stop()
   Write-Diagnostic 'configuration' 'configuration' 'healthy' 'configuration_valid' 1 $configurationTimer.ElapsedMilliseconds
   $startupPhase = 'services'
-  $env:NODARIS_ALLOWED_ROOTS = $approvedRoot
   $env:GATEWAY_HOST = '127.0.0.1'
   $env:GATEWAY_PORT = '3333'
   $env:AGENT_HOST = '127.0.0.1'

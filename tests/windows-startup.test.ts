@@ -11,6 +11,10 @@ const supervisorPath = new URL("../scripts/windows/supervisor.ps1", import.meta.
 const diagnosticsPath = new URL("../scripts/windows/diagnostics.ps1", import.meta.url);
 const lifecyclePath = new URL("../scripts/windows/lifecycle.ps1", import.meta.url);
 const localRootsPath = new URL("../scripts/windows/local-roots.ps1", import.meta.url);
+const supervisorRootsFixturePath = new URL(
+  "./fixtures/windows/supervisor-roots-smoke.ps1",
+  import.meta.url
+);
 
 describe("inicialização invisível do Windows", () => {
   it("usa WScript com janela oculta e sem credenciais em argumentos", async () => {
@@ -110,20 +114,84 @@ describe("inicialização invisível do Windows", () => {
     expect(launcher).not.toMatch(/NODARIS_TOKEN|Bearer|Authorization|api.?key/i);
   });
 
-  it("mantém o leitor de raízes isolado até a ativação aprovada", async () => {
+  it("carrega e valida as raízes autorizadas antes de iniciar qualquer serviço", async () => {
     const supervisor = await readFile(supervisorPath, "utf8");
     const reader = await readFile(localRootsPath, "utf8");
+    const rootsFixture = await readFile(supervisorRootsFixturePath, "utf8");
+    const helperStart = supervisor.indexOf("function Get-NodarisAllowedRootsValue");
+    const helperEnd = supervisor.indexOf("function Start-Stack", helperStart);
+    const integration = supervisor.slice(helperStart, helperEnd);
+    const loadCall = supervisor.indexOf("Initialize-NodarisAllowedRoots -ReaderScriptPath");
+    const startCall = supervisor.indexOf("\n  Start-Stack\n", loadCall);
 
-    expect(supervisor).toContain("$approvedRoot = 'C:\\Users\\Dell\\Downloads\\Nodaris'");
-    expect(supervisor).not.toContain("local-roots.ps1");
-    expect(supervisor).not.toContain("Read-NodarisLocalRoots");
+    expect(supervisor).toContain("Join-Path $PSScriptRoot 'local-roots.ps1'");
+    expect(supervisor).toContain(
+      "Join-Path $env:LOCALAPPDATA 'Nodaris\\config\\allowed-roots.json'"
+    );
+    expect(supervisor).toContain("Read-NodarisLocalRoots -Path $ConfigPath");
+    expect(supervisor).toContain("$env:NODARIS_ALLOWED_ROOTS = $allowedRootsValue");
+    expect(supervisor).toContain("$validatedRoots -join ';'");
+    expect(supervisor).not.toContain("$approvedRoot");
+    expect(supervisor).not.toMatch(/C:\\Users\\Dell\\Downloads\\Nodaris/i);
+    expect(integration).not.toMatch(/\$repoRoot|USERPROFILE|Downloads/i);
+    expect(integration).toContain("Remove-Item Env:NODARIS_ALLOWED_ROOTS");
+    expect(integration).toContain("throw 'NODARIS_ROOT_CONFIG_REJECTED'");
+    expect(integration).toContain("'configuration_invalid'");
+    expect(loadCall).toBeGreaterThan(supervisor.indexOf("'mutex_acquired'"));
+    expect(startCall).toBeGreaterThan(loadCall);
     expect(reader).toContain("NODARIS_ROOT_CONFIG_REJECTED");
     expect(reader).toContain("AreAccessRulesProtected");
     expect(reader).toContain("ReparsePoint");
     expect(reader).toContain("candidate.Contains(';')");
     expect(reader).toContain("Test-NodarisJsonKeysUnique");
     expect(reader).toContain("schemaVersion = 1");
+    expect(rootsFixture).toContain("Invoke-FixtureStartup $configPath $unexpectedReaderPath");
+    expect(rootsFixture).toContain("Invoke-FixtureStartup $configPath $script:ReaderPath");
+    expect(rootsFixture).toContain("if ($global:NodarisTestFakeReaderCalls -ne 1)");
+    expect(rootsFixture).toContain(
+      'Write-FixtureConfig $configPath (\'{"schemaVersion":1,"allowedRoots":["\' + $escapedOne + \'"]}\')'
+    );
   });
+
+  it.skipIf(process.platform !== "win32")(
+    "simula a integração de raízes no PowerShell sem executar o supervisor real",
+    async () => {
+      const windowsDirectory = process.env["WINDIR"] ?? "C:\\Windows";
+      const powershell = join(
+        windowsDirectory,
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe"
+      );
+      const outputDirectory = await mkdtemp(join(tmpdir(), "nodaris-supervisor-roots-"));
+      try {
+        const output = execFileSync(
+          powershell,
+          [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            fileURLToPath(supervisorRootsFixturePath),
+            outputDirectory,
+            fileURLToPath(supervisorPath),
+            fileURLToPath(localRootsPath)
+          ],
+          { encoding: "utf8", timeout: 45_000 }
+        );
+        expect(output).toContain("supervisor-roots-fixtures=PASS");
+        expect(output).toContain("valid-roots=single,multiple");
+        expect(output).toContain("fail-closed=missing,invalid,unexpected-output,acl");
+        expect(output).toContain("start-stack-calls=2");
+        expect(output).toContain("telemetry-sanitized=PASS");
+      } finally {
+        await rm(outputDirectory, { recursive: true, force: true });
+      }
+    },
+    55_000
+  );
 
   it.skipIf(process.platform !== "win32")(
     "testa backoff, health fixtures, falha sanitizada, ACL e rotação no PowerShell",
