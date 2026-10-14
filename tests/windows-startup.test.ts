@@ -19,6 +19,10 @@ const processIdentityFixturePath = new URL(
   "./fixtures/windows/process-identity-smoke.ps1",
   import.meta.url
 );
+const finalizationFixturePath = new URL(
+  "./fixtures/windows/finalization-smoke.ps1",
+  import.meta.url
+);
 
 describe("inicialização invisível do Windows", () => {
   it("usa WScript com janela oculta e sem credenciais em argumentos", async () => {
@@ -131,6 +135,76 @@ describe("inicialização invisível do Windows", () => {
     40_000
   );
 
+  it("usa finalização testável que persiste estado parcial e libera o mutex", async () => {
+    const lifecycle = await readFile(lifecyclePath, "utf8");
+    const supervisor = await readFile(supervisorPath, "utf8");
+    const diagnostics = await readFile(diagnosticsPath, "utf8");
+    const fixture = await readFile(finalizationFixturePath, "utf8");
+
+    expect(lifecycle).toContain("function Invoke-NodarisFinalization");
+    expect(lifecycle).toContain("function Get-NodarisServiceSnapshot");
+    expect(lifecycle).toContain("function Test-NodarisComponentStopped");
+    expect(lifecycle).toContain("cleanup_failed_manual_intervention");
+    expect(lifecycle).toContain("return 'identity_inconclusive'");
+    expect(supervisor).toContain("Invoke-NodarisFinalization -Names $finalizationNames");
+    expect(supervisor).toContain(
+      "$finalizationRequestedStatus = if ($circuitOpen) { 'degraded' } else { 'stopped' }"
+    );
+    expect(supervisor).toContain(
+      "$finalizationRequestedStatus = if ($circuitOpen) { 'degraded' } else { 'error' }"
+    );
+    expect(supervisor).toContain("$finalizationEvidence[$Name]");
+    expect(supervisor).toContain("cleanup_failed_manual_intervention");
+    expect(lifecycle).toContain("state_write_failed");
+    expect(supervisor).toContain("Get-FinalizationPortStatus");
+    expect(supervisor).toContain("if (-not (Test-NodarisPrivateDirectoryAcl $stateRoot))");
+    expect(diagnostics).toContain("'state_write_failed'");
+    expect(diagnostics).toContain("'mutex_release_failed'");
+    expect(fixture).toContain("Invoke-NodarisFinalization -Names");
+
+    if (process.platform !== "win32") return;
+
+    const windowsDirectory = process.env["WINDIR"] ?? "C:\\Windows";
+    const powershell = join(
+      windowsDirectory,
+      "System32",
+      "WindowsPowerShell",
+      "v1.0",
+      "powershell.exe"
+    );
+    const outputDirectory = await mkdtemp(join(tmpdir(), "nodaris-finalization-"));
+    try {
+      const output = execFileSync(
+        powershell,
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          fileURLToPath(finalizationFixturePath),
+          outputDirectory
+        ],
+        { encoding: "utf8", timeout: 30_000 }
+      );
+      expect(output).toContain("finalization-fixtures=PASS");
+      expect(output).toContain(
+        "cleanup-cases=normal,first-child,second-child,multiple,identity-unconfirmed,pid-reuse"
+      );
+      expect(output).toContain(
+        "persistence-cases=after-cleanup,diagnostic-failure,state-write-failure,combined-failure"
+      );
+      expect(output).toContain(
+        "terminal-state-cases=breaker-complete:degraded,breaker-partial:degraded,normal-complete:stopped,startup-error-complete:error,startup-error-breaker:degraded"
+      );
+      expect(output).toContain(
+        "invariants=manual-state-preserved,no-false-stopped,identity-snapshot-retained,manager-blocked,mutex-released,sanitized"
+      );
+    } finally {
+      await rm(outputDirectory, { recursive: true, force: true });
+    }
+  }, 40_000);
+
   it("distingue health local do polling recente no plano de controle", async () => {
     const launcher = await readFile(launcherPath, "utf8");
     const manager = await readFile(managerPath, "utf8");
@@ -163,7 +237,7 @@ describe("inicialização invisível do Windows", () => {
       supervisor.indexOf("Flush-StartupTrace | Out-Null")
     );
     expect(supervisor).toContain("Invoke-NodarisRecoveryPolicy");
-    expect(supervisor).toContain("Stop-NodarisChildrenInOrder");
+    expect(supervisor).toContain("Invoke-NodarisFinalization");
     expect(supervisor).toContain("@('--import', 'tsx'");
     expect(supervisor).not.toContain("$tsxCli");
     expect(lifecycle).toContain("circuit_open");

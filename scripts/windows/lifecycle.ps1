@@ -114,6 +114,14 @@ function Get-NodarisSupervisorDisposition {
     if ($ambiguousResources) { return 'identity_inconclusive' }
     return 'stopped'
   }
+  if ($null -ne $State.services) {
+    foreach ($name in @('agent', 'gateway', 'tunnel')) {
+      $service = $State.services.$name
+      if ($null -ne $service -and $service.status -in @('identity_unconfirmed_manual_intervention', 'cleanup_failed_manual_intervention')) {
+        return 'identity_inconclusive'
+      }
+    }
+  }
   if ($IdentityQueryStatus -eq 'inconclusive') { return 'identity_inconclusive' }
   if ($IdentityQueryStatus -eq 'absent') {
     if ($ambiguousResources) { return 'identity_inconclusive' }
@@ -311,4 +319,119 @@ function Stop-NodarisChildrenInOrder {
   }
   if ($failed) { throw 'NODARIS_STOP_FAILED' }
   return ,$stopped.ToArray()
+}
+
+function Get-NodarisServiceSnapshot {
+  param(
+    [Parameter(Mandatory = $true)][string[]]$Names,
+    [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Children,
+    [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Identities,
+    [Parameter(Mandatory = $true)][System.Collections.IDictionary]$FinalizationEvidence,
+    [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Statuses,
+    [Parameter(Mandatory = $true)][System.Collections.IDictionary]$RestartCounts
+  )
+
+  $services = @{}
+  foreach ($name in $Names) {
+    $pidValue = $null
+    $identity = $null
+    if ($Children.Contains($name) -and $null -ne $Children[$name]) {
+      $pidValue = [int]$Children[$name].Id
+      if ($Identities.Contains($name)) { $identity = $Identities[$name] }
+    } elseif ($FinalizationEvidence.Contains($name)) {
+      $pidValue = $FinalizationEvidence[$name].processId
+      $identity = $FinalizationEvidence[$name].identity
+    }
+    $services[$name] = @{
+      status = $Statuses[$name]
+      pid = $pidValue
+      restartCount = $RestartCounts[$name]
+      identity = $identity
+    }
+  }
+  return $services
+}
+
+function Test-NodarisComponentStopped {
+  param(
+    [Parameter(Mandatory = $true)][ValidateSet('absent', 'exited', 'running', 'inconclusive')][string]$ProcessStatus,
+    [Parameter(Mandatory = $true)][ValidateSet('clear', 'busy', 'inconclusive')][string]$PortStatus,
+    [bool]$ManualInterventionRequired = $false
+  )
+  if ($ManualInterventionRequired -or $PortStatus -ne 'clear') { return $false }
+  return $ProcessStatus -in @('absent', 'exited')
+}
+
+function Invoke-NodarisFinalization {
+  param(
+    [Parameter(Mandatory = $true)][string[]]$Names,
+    [Parameter(Mandatory = $true)][ValidateSet('stopped', 'error', 'degraded')][string]$RequestedStatus,
+    [Parameter(Mandatory = $true)][scriptblock]$StopAction,
+    [Parameter(Mandatory = $true)][scriptblock]$IsStoppedAction,
+    [Parameter(Mandatory = $true)][scriptblock]$FailureAction,
+    [Parameter(Mandatory = $true)][scriptblock]$PersistAction,
+    [Parameter(Mandatory = $true)][scriptblock]$DiagnosticAction,
+    [Parameter(Mandatory = $true)][scriptblock]$ReleaseAction
+  )
+
+  $cleanupFailures = 0
+  $unconfirmed = 0
+  $diagnosticFailures = 0
+  $persisted = $false
+  $mutexReleased = $false
+  $finalStatus = 'degraded'
+
+  try {
+    foreach ($name in $Names) {
+      try {
+        & $StopAction $name | Out-Null
+      } catch {
+        $cleanupFailures++
+        try { & $FailureAction $name 'cleanup_failed' | Out-Null } catch { }
+        try { & $DiagnosticAction $name 'cleanup_failed' | Out-Null } catch { $diagnosticFailures++ }
+      }
+    }
+
+    $allStopped = $true
+    foreach ($name in $Names) {
+      $confirmed = $false
+      try {
+        $confirmation = @(& $IsStoppedAction $name)
+        $confirmed = $confirmation.Count -eq 1 -and $confirmation[0] -is [bool] -and $confirmation[0]
+      } catch { $confirmed = $false }
+      if (-not $confirmed) {
+        $allStopped = $false
+        $unconfirmed++
+        try { & $FailureAction $name 'stop_unconfirmed' | Out-Null } catch { }
+        try { & $DiagnosticAction $name 'stop_unconfirmed' | Out-Null } catch { $diagnosticFailures++ }
+      }
+    }
+
+    if (-not $allStopped -or $RequestedStatus -eq 'degraded') { $finalStatus = 'degraded' }
+    elseif ($RequestedStatus -eq 'error') { $finalStatus = 'error' }
+    else { $finalStatus = 'stopped' }
+
+    try {
+      & $PersistAction $finalStatus | Out-Null
+      $persisted = $true
+    } catch {
+      try { & $DiagnosticAction 'supervisor' 'state_write_failed' | Out-Null } catch { $diagnosticFailures++ }
+    }
+  } finally {
+    try {
+      & $ReleaseAction | Out-Null
+      $mutexReleased = $true
+    } catch {
+      try { & $DiagnosticAction 'supervisor' 'mutex_release_failed' | Out-Null } catch { $diagnosticFailures++ }
+    }
+  }
+
+  return [pscustomobject]@{
+    status = $finalStatus
+    cleanupFailureCount = $cleanupFailures
+    unconfirmedCount = $unconfirmed
+    diagnosticFailureCount = $diagnosticFailures
+    persisted = $persisted
+    mutexReleased = $mutexReleased
+  }
 }

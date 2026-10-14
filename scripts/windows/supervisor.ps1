@@ -79,6 +79,8 @@ $maxRestarts = 5
 $mutex = [Threading.Mutex]::new($false, 'LocalNodaris-M01-Supervisor')
 $children = @{}
 $childIdentities = @{}
+$stopRequestedChildren = @{}
+$finalizationEvidence = @{}
 $script:supervisorIdentity = $null
 $restartCounts = @{ agent = 0; gateway = 0; tunnel = 0 }
 $statuses = @{ agent = 'pending'; gateway = 'pending'; tunnel = 'pending' }
@@ -89,6 +91,8 @@ $lastAgentHealthReason = 'health_request_failed'
 $lastTunnelReadiness = 'unknown'
 $lastTunnelReadinessLogged = ''
 $startupPhase = 'configuration'
+$finalizationRequestedStatus = 'error'
+$mutexOwned = $false
 $diagnosticsLoadTimer = [Diagnostics.Stopwatch]::StartNew()
 Add-StartupCheckpoint 'bootstrap' 'started' 'diagnostics_load_started'
 . $diagnosticsScript
@@ -118,14 +122,8 @@ function Flush-StartupTrace {
 }
 
 function Write-State([string]$SupervisorStatus) {
-  $services = @{}
-  foreach ($name in @('agent', 'gateway', 'tunnel')) {
-    $pidValue = $null
-    if ($children.ContainsKey($name) -and $null -ne $children[$name]) { $pidValue = $children[$name].Id }
-    $identity = $null
-    if ($childIdentities.ContainsKey($name)) { $identity = $childIdentities[$name] }
-    $services[$name] = @{ status = $statuses[$name]; pid = $pidValue; restartCount = $restartCounts[$name]; identity = $identity }
-  }
+  $services = Get-NodarisServiceSnapshot -Names @('agent', 'gateway', 'tunnel') -Children $children `
+    -Identities $childIdentities -FinalizationEvidence $finalizationEvidence -Statuses $statuses -RestartCounts $restartCounts
   $state = @{ status = $SupervisorStatus; supervisorPid = $PID; supervisorIdentity = $script:supervisorIdentity; updatedAt = [DateTime]::UtcNow.ToString('o'); services = $services }
   $temporary = "$stateFile.tmp"
   [IO.File]::WriteAllText($temporary, ($state | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
@@ -140,6 +138,19 @@ function Test-Port([int]$Port) {
     $client.EndConnect($pending)
     return $true
   } catch { return $false } finally { $client.Dispose() }
+}
+
+function Get-FinalizationPortStatus([int]$Port) {
+  $client = [Net.Sockets.TcpClient]::new()
+  try {
+    $pending = $client.BeginConnect('127.0.0.1', $Port, $null, $null)
+    if (-not $pending.AsyncWaitHandle.WaitOne(500)) { return 'inconclusive' }
+    try { $client.EndConnect($pending); return 'busy' }
+    catch [Net.Sockets.SocketException] {
+      if ($_.Exception.SocketErrorCode -eq [Net.Sockets.SocketError]::ConnectionRefused) { return 'clear' }
+      return 'inconclusive'
+    }
+  } catch { return 'inconclusive' } finally { $client.Dispose() }
 }
 
 function Test-AgentHealth {
@@ -234,6 +245,8 @@ function Start-Child([string]$Name, [string]$Executable, [string[]]$Arguments, [
   $process = Start-Process -FilePath $Executable -ArgumentList $argumentLine -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
   $timer.Stop()
   $children[$Name] = $process
+  $childIdentities.Remove($Name) | Out-Null
+  $stopRequestedChildren.Remove($Name) | Out-Null
   $statuses[$Name] = 'starting; identidade pendente'
   Write-State 'starting'
   try {
@@ -260,10 +273,15 @@ function Start-Child([string]$Name, [string]$Executable, [string[]]$Arguments, [
 function Stop-Child([string]$Name) {
   if ($children.ContainsKey($Name) -and $null -ne $children[$Name]) {
     $process = $children[$Name]
-    if (-not $process.HasExited) {
-      $expectedIdentity = $childIdentities[$Name]
-      if ($null -eq $expectedIdentity) { throw 'NODARIS_PROCESS_IDENTITY_UNCONFIRMED' }
-      Stop-NodarisVerifiedProcess -Process $process -ExpectedIdentity $expectedIdentity
+    $identity = if ($childIdentities.ContainsKey($Name)) { $childIdentities[$Name] } else { $null }
+    if ($null -eq $identity) {
+      $statuses[$Name] = 'identity_unconfirmed_manual_intervention'
+      $stopRequestedChildren[$Name] = $true
+      throw 'NODARIS_PROCESS_IDENTITY_UNCONFIRMED'
+    }
+    if (-not $process.HasExited -and -not $stopRequestedChildren.ContainsKey($Name)) {
+      $stopRequestedChildren[$Name] = $true
+      Stop-NodarisVerifiedProcess -Process $process -ExpectedIdentity $identity
     }
     $port = @{ agent = 3334; gateway = 3333; tunnel = 8080 }[$Name]
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
@@ -275,8 +293,10 @@ function Stop-Child([string]$Name) {
     $process.Refresh()
     if (-not $process.HasExited) { throw 'NODARIS_STOP_TIMEOUT' }
     if (Test-Port $port) { throw 'NODARIS_PORT_STILL_LISTENING' }
+    $finalizationEvidence[$Name] = @{ processId = [int]$process.Id; identity = $identity }
     $children[$Name] = $null
     $childIdentities.Remove($Name) | Out-Null
+    $stopRequestedChildren.Remove($Name) | Out-Null
   }
   $statuses[$Name] = 'stopped'
 }
@@ -473,7 +493,9 @@ function Restart-Child([string]$Name) {
 try {
   $mutexTimer = [Diagnostics.Stopwatch]::StartNew()
   Add-StartupCheckpoint 'mutex' 'started' 'mutex_wait_started'
-  if (-not $mutex.WaitOne(0)) {
+  try { $mutexOwned = $mutex.WaitOne(0) }
+  catch [Threading.AbandonedMutexException] { $mutexOwned = $true; throw }
+  if (-not $mutexOwned) {
     $mutexTimer.Stop()
     Add-StartupCheckpoint 'mutex' 'skipped' 'duplicate_instance' ([DateTime]::UtcNow) $mutexTimer.ElapsedMilliseconds
     try {
@@ -565,13 +587,7 @@ try {
     }
     Start-Sleep -Seconds 3
   }
-  $shutdownOrder = @('tunnel', 'gateway', 'agent')
-  Stop-NodarisChildrenInOrder -Names $shutdownOrder -StopAction {
-    param($name)
-    Stop-Child $name
-    Write-Diagnostic $name 'lifecycle' 'stopped' 'stop_requested' $restartCounts[$name]
-  } | Out-Null
-  Write-State $(if ($circuitOpen) { 'degraded' } else { 'stopped' })
+  $finalizationRequestedStatus = if ($circuitOpen) { 'degraded' } else { 'stopped' }
 } catch {
   $reason = if ($startupPhase -eq 'configuration') { 'configuration_invalid' } else { 'startup_failed' }
   $startupTimer.Stop()
@@ -580,11 +596,50 @@ try {
     $configurationTimer.Stop()
     $failureDuration = $configurationTimer.ElapsedMilliseconds
   }
-  Write-Diagnostic $(if ($startupPhase -eq 'configuration') { 'configuration' } else { 'supervisor' }) 'lifecycle' 'failed' $reason 1 $failureDuration
-  Stop-NodarisChildrenInOrder -Names @('tunnel', 'gateway', 'agent') -StopAction { param($name) Stop-Child $name } | Out-Null
-  $statuses.agent = 'error; consulte procedimento local'
-  Write-State $(if ($circuitOpen) { 'degraded' } else { 'error' })
+  try { Write-Diagnostic $(if ($startupPhase -eq 'configuration') { 'configuration' } else { 'supervisor' }) 'lifecycle' 'failed' $reason 1 $failureDuration } catch { }
+  $finalizationRequestedStatus = if ($circuitOpen) { 'degraded' } else { 'error' }
 } finally {
-  try { $mutex.ReleaseMutex() } catch { }
-  $mutex.Dispose()
+  if ($mutexOwned) {
+    $finalizationNames = @('tunnel', 'gateway', 'agent')
+    $stopAction = { param($name) Stop-Child $name }.GetNewClosure()
+    $isStoppedAction = {
+      param($name)
+      $manualIntervention = $statuses[$name] -in @('identity_unconfirmed_manual_intervention', 'cleanup_failed_manual_intervention')
+      $port = @{ agent = 3334; gateway = 3333; tunnel = 8080 }[$name]
+      $portStatus = Get-FinalizationPortStatus $port
+      $process = $children[$name]
+      if ($null -eq $process) {
+        return (Test-NodarisComponentStopped -ProcessStatus absent -PortStatus $portStatus -ManualInterventionRequired $manualIntervention)
+      }
+      $processStatus = 'inconclusive'
+      try {
+        $process.Refresh()
+        if ($process.HasExited) { $processStatus = 'exited' } else { $processStatus = 'running' }
+      } catch { $processStatus = 'inconclusive' }
+      return (Test-NodarisComponentStopped -ProcessStatus $processStatus -PortStatus $portStatus -ManualInterventionRequired $manualIntervention)
+    }.GetNewClosure()
+    $failureAction = {
+      param($name, $reasonCode)
+      if ($statuses[$name] -ne 'identity_unconfirmed_manual_intervention') {
+        $statuses[$name] = 'cleanup_failed_manual_intervention'
+      }
+    }.GetNewClosure()
+    $persistAction = {
+      param($status)
+      if (-not (Test-NodarisPrivateDirectoryAcl $stateRoot)) { throw 'NODARIS_STATE_DIRECTORY_UNPROTECTED' }
+      Write-State $status
+    }.GetNewClosure()
+    $diagnosticAction = {
+      param($component, $reasonCode)
+      Write-Diagnostic $component 'finalization' 'failed' $reasonCode 0
+    }.GetNewClosure()
+    $releaseAction = {
+      try { $mutex.ReleaseMutex() } finally { $mutex.Dispose() }
+    }.GetNewClosure()
+    $script:finalizationResult = Invoke-NodarisFinalization -Names $finalizationNames `
+      -RequestedStatus $finalizationRequestedStatus -StopAction $stopAction -IsStoppedAction $isStoppedAction `
+      -FailureAction $failureAction -PersistAction $persistAction -DiagnosticAction $diagnosticAction -ReleaseAction $releaseAction
+  } else {
+    $mutex.Dispose()
+  }
 }
