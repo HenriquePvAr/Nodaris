@@ -21,6 +21,8 @@ let gatewayPort = 0;
 let agent: ChildProcess | undefined;
 let gateway: ChildProcess | undefined;
 let client: Client | undefined;
+let agentLogs = "";
+let gatewayLogs = "";
 
 async function freePort(): Promise<number> {
   const server = createServer();
@@ -61,7 +63,7 @@ async function waitFor(
 
 function start(script: string): ChildProcess {
   const tsx = path.join(repository, "node_modules", "tsx", "dist", "cli.mjs");
-  return spawn(process.execPath, [tsx, path.join(repository, script)], {
+  const child = spawn(process.execPath, [tsx, path.join(repository, script)], {
     cwd: repository,
     windowsHide: true,
     env: {
@@ -74,8 +76,15 @@ function start(script: string): ChildProcess {
       AGENT_PORT: String(agentPort),
       GATEWAY_PORT: String(gatewayPort)
     },
-    stdio: "ignore"
+    stdio: ["ignore", "pipe", "pipe"]
   });
+  const collect = (chunk: Buffer): void => {
+    if (script.includes("agent")) agentLogs += chunk.toString("utf8");
+    else gatewayLogs += chunk.toString("utf8");
+  };
+  child.stdout?.on("data", collect);
+  child.stderr?.on("data", collect);
+  return child;
 }
 
 async function stop(process: ChildProcess | undefined): Promise<void> {
@@ -168,6 +177,9 @@ describe("MCP local entre processos", () => {
       arguments: { projectId: gitProject!.id, path: "../../outside.txt" }
     });
     expect("isError" in denied && denied.isError).toBe(true);
+    expect((denied.content[0] as { text: string }).text).toBe(
+      "Caminho bloqueado pela política de segurança."
+    );
     const status = await client!.callTool({
       name: "nodaris_git_status",
       arguments: { projectId: gitProject!.id }
@@ -184,6 +196,136 @@ describe("MCP local entre processos", () => {
       arguments: { projectId: gitProject!.id }
     });
     expect(JSON.stringify(diff)).toContain("fixture alterado");
+  });
+
+  it("sanitiza erros de filesystem nas respostas HTTP, MCP e logs", async () => {
+    const listed = await client!.callTool({ name: "nodaris_projects_list", arguments: {} });
+    const projects = JSON.parse((listed.content[0] as { text: string }).text) as Array<{
+      id: string;
+      name: string;
+    }>;
+    const project = projects.find((candidate) => candidate.name === "sample-project");
+    expect(project).toBeDefined();
+    const sentinel = "m12-05-private-path-sentinel";
+    const payload = {
+      operation: "file.read",
+      projectId: project!.id,
+      path: `${sentinel}/missing.ts`
+    };
+    const response = await fetch(`http://127.0.0.1:${agentPort}/rpc`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const body = (await response.json()) as { error: string; code: string };
+    expect(response.status).toBe(400);
+    expect(body).toMatchObject({
+      error: "Falha ao processar arquivo ou diretório.",
+      code: "FILESYSTEM_FAILURE"
+    });
+    expect(JSON.stringify(body)).not.toContain(sentinel);
+    expect(JSON.stringify(body)).not.toContain(repository);
+
+    const mcp = await client!.callTool({
+      name: "nodaris_file_read",
+      arguments: { projectId: project!.id, path: `${sentinel}/missing.ts` }
+    });
+    const mcpText = (mcp.content[0] as { text: string }).text;
+    expect(mcp.isError).toBe(true);
+    expect(mcpText).toBe("Falha ao processar arquivo ou diretório.");
+    expect(mcpText).not.toContain(sentinel);
+    expect(mcpText).not.toContain(repository);
+    expect(agentLogs).not.toContain(sentinel);
+    expect(agentLogs).not.toContain(repository);
+    expect(gatewayLogs).not.toContain(sentinel);
+    expect(gatewayLogs).not.toContain(repository);
+    expect(agentLogs).toContain('"motivo":"filesystem.failure"');
+    expect(gatewayLogs).toContain('"componente":"gateway"');
+
+    let validationFailure = "";
+    try {
+      const invalid = await client!.callTool({
+        name: "nodaris_file_read",
+        arguments: { projectId: { [sentinel]: true }, path: 4 }
+      });
+      validationFailure = JSON.stringify(invalid);
+    } catch (error) {
+      validationFailure = error instanceof Error ? error.message : "falha";
+    }
+    expect(validationFailure.length).toBeGreaterThan(0);
+    expect(validationFailure).not.toContain(sentinel);
+    expect(validationFailure).not.toContain(repository);
+  });
+
+  it("classifica JSON malformado sem refletir a entrada recebida", async () => {
+    const sentinel = "m12-05-malformed-secret-sentinel";
+    const response = await fetch(`http://127.0.0.1:${agentPort}/rpc`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: `{"${sentinel}":`
+    });
+    const body = (await response.json()) as { error: string; code: string };
+    expect(response.status).toBe(400);
+    expect(body).toEqual({ error: "Requisição inválida.", code: "REQUEST_INVALID" });
+    expect(JSON.stringify(body)).not.toContain(sentinel);
+    expect(agentLogs).not.toContain(sentinel);
+
+    const invalid = await fetch(`http://127.0.0.1:${agentPort}/rpc`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ operation: "unknown", sentinel })
+    });
+    const invalidBody = (await invalid.json()) as { error: string; code: string };
+    expect(invalid.status).toBe(400);
+    expect(invalidBody).toEqual({ error: "Requisição inválida.", code: "REQUEST_INVALID" });
+    expect(JSON.stringify(invalidBody)).not.toContain(sentinel);
+    expect(agentLogs).not.toContain(sentinel);
+  });
+
+  it("sanitiza falhas Git sem repassar configuração, comando ou stderr", async () => {
+    const configPath = path.join(temporaryGitRoot, ".git", "config");
+    const original = await (await import("node:fs/promises")).readFile(configPath);
+    const sentinel = "m12-05-git-stderr-sentinel";
+    await writeFile(configPath, `[${sentinel}\ninvalid = "\n`);
+    try {
+      const listed = await client!.callTool({ name: "nodaris_projects_list", arguments: {} });
+      const projects = JSON.parse((listed.content[0] as { text: string }).text) as Array<{
+        id: string;
+        path: string;
+      }>;
+      const gitProject = projects.find((project) => project.path === temporaryGitRoot);
+      expect(gitProject).toBeDefined();
+      const response = await fetch(`http://127.0.0.1:${agentPort}/rpc`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ operation: "git.status", projectId: gitProject!.id })
+      });
+      const body = (await response.json()) as { error: string; code: string };
+      expect(response.status).toBe(400);
+      expect(body).toEqual({
+        error: "Falha ao consultar o repositório Git.",
+        code: "GIT_FAILURE"
+      });
+      expect(JSON.stringify(body)).not.toContain(sentinel);
+      expect(JSON.stringify(body)).not.toContain(temporaryGitRoot);
+      expect(agentLogs).not.toContain(sentinel);
+      expect(agentLogs).not.toContain(temporaryGitRoot);
+      expect(agentLogs).toContain('"motivo":"git.failure"');
+
+      const mcp = await client!.callTool({
+        name: "nodaris_git_status",
+        arguments: { projectId: gitProject!.id }
+      });
+      const mcpText = (mcp.content[0] as { text: string }).text;
+      expect(mcp.isError).toBe(true);
+      expect(mcpText).toBe("Falha ao consultar o repositório Git.");
+      expect(mcpText).not.toContain(sentinel);
+      expect(mcpText).not.toContain(temporaryGitRoot);
+      expect(gatewayLogs).not.toContain(sentinel);
+      expect(gatewayLogs).not.toContain(temporaryGitRoot);
+    } finally {
+      await writeFile(configPath, original);
+    }
   });
 
   it("recusa token inválido no agente", async () => {

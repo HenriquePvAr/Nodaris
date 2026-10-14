@@ -12,6 +12,41 @@ import { vi } from "vitest";
 import { ProjectStore } from "../packages/core/src/filesystem.js";
 import { loadConfig } from "../packages/core/src/config.js";
 import { gitDiff, gitLog, gitStatus } from "../packages/core/src/git.js";
+import { NodarisError, safeError } from "../packages/core/src/errors.js";
+
+describe("classificação segura de erros", () => {
+  it("não expõe exceções nativas, caminhos absolutos ou sentinelas", () => {
+    const sentinel = "C:\\Users\\PrivateFixture\\secret-sentinel.txt API_TOKEN=sentinel-value";
+    const mapped = safeError(new Error(`ENOENT ${sentinel}`), "file.read");
+    expect(mapped).toEqual({
+      code: "FILESYSTEM_FAILURE",
+      message: "Falha ao processar arquivo ou diretório.",
+      reason: "filesystem.failure"
+    });
+    expect(JSON.stringify(mapped)).not.toContain(sentinel);
+    const denied = Object.assign(new Error(`EACCES ${sentinel}`), { code: "EACCES" });
+    expect(JSON.stringify(safeError(denied, "file.read"))).not.toContain(sentinel);
+    expect(
+      JSON.stringify(safeError(new Error(`git stderr ${sentinel}`), "git.status"))
+    ).not.toContain(sentinel);
+  });
+
+  it("preserva somente mensagens funcionais tipadas e códigos de pesquisa seguros", () => {
+    expect(safeError(new NodarisError("ADS_BLOCKED")).message).toBe(
+      "Fluxos de dados alternativos NTFS não são permitidos."
+    );
+    expect(safeError(new NodarisError("SYMLINK_BLOCKED")).message).toBe(
+      "Acesso por link simbólico não é permitido."
+    );
+    expect(safeError(new NodarisError("SEARCH_LIMIT")).message).toBe(
+      "Pesquisa interrompida pelo limite de recursos."
+    );
+    expect(safeError(new NodarisError("SEARCH_CONCURRENCY_LIMIT")).message).toBe(
+      "Limite de pesquisas simultâneas atingido."
+    );
+    expect(safeError(new Error("arbitrary private text")).message).toBe("Falha interna.");
+  });
+});
 
 const exec = promisify(execFile);
 const temporaryDirectories: string[] = [];

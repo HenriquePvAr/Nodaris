@@ -7,6 +7,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { secretContent, secretName } from "./filesystem.js";
 import type { Project } from "./contracts.js";
+import { NodarisError } from "./errors.js";
 
 const run = promisify(execFile);
 function safeEnvironment(): NodeJS.ProcessEnv {
@@ -24,26 +25,30 @@ async function assertSafeRepository(project: Project): Promise<void> {
   const marker = path.join(project.path, ".git");
   const info = await lstat(marker);
   if (!info.isDirectory() || info.isSymbolicLink())
-    throw new Error("Consultas Git bloqueadas para repositório com metadados externos.");
+    throw new NodarisError("GIT_REPOSITORY_BLOCKED");
   const canonical = await realpath(marker);
   const relative = path.relative(project.path, canonical);
   if (relative.startsWith("..") || path.isAbsolute(relative))
-    throw new Error("Metadados Git fora do projeto autorizado.");
+    throw new NodarisError("GIT_METADATA_OUTSIDE");
 }
 
 const safeGit = async (project: Project, args: string[], maxBuffer = 200_000): Promise<string> => {
   await assertSafeRepository(project);
-  const result = await run(
-    "git",
-    ["-C", project.path, "-c", "core.fsmonitor=false", "-c", "core.pager=cat", ...args],
-    {
-      timeout: 5_000,
-      maxBuffer,
-      windowsHide: true,
-      env: safeEnvironment()
-    }
-  );
-  return result.stdout;
+  try {
+    const result = await run(
+      "git",
+      ["-C", project.path, "-c", "core.fsmonitor=false", "-c", "core.pager=cat", ...args],
+      {
+        timeout: 5_000,
+        maxBuffer,
+        windowsHide: true,
+        env: safeEnvironment()
+      }
+    );
+    return result.stdout;
+  } catch {
+    throw new NodarisError("GIT_FAILURE");
+  }
 };
 
 export async function gitStatus(project: Project): Promise<string> {
@@ -59,7 +64,7 @@ export async function gitDiff(project: Project): Promise<string> {
     .split("\0")
     .filter(Boolean);
   if (changedPaths.some((file) => secretName.test(path.basename(file)))) {
-    throw new Error("Diff bloqueado porque o repositório contém arquivos sensíveis alterados.");
+    throw new NodarisError("GIT_DIFF_SENSITIVE_FILE");
   }
   for (const relative of (await safeGit(project, ["ls-files", "--cached", "-z"]))
     .split("\0")
@@ -68,24 +73,22 @@ export async function gitDiff(project: Project): Promise<string> {
     const attributesPath = path.join(project.path, relative);
     const attributesInfo = await lstat(attributesPath);
     if (!attributesInfo.isFile() || attributesInfo.isSymbolicLink())
-      throw new Error("Diff bloqueado porque .gitattributes não é arquivo regular.");
+      throw new NodarisError("GIT_ATTRIBUTES_INVALID");
     const canonical = await realpath(attributesPath);
     if (!canonical.startsWith(`${path.resolve(project.path)}${path.sep}`))
-      throw new Error("Diff bloqueado porque .gitattributes sai do projeto.");
+      throw new NodarisError("GIT_ATTRIBUTES_OUTSIDE");
     const content = await readFile(canonical, "utf8");
     if (/\bfilter\s*=|\btextconv\s*=|\bdiff\s*=\s*\S+/i.test(content))
-      throw new Error("Diff bloqueado porque o repositório configura filtros Git externos.");
+      throw new NodarisError("GIT_EXTERNAL_FILTER");
   }
   const output = await safeGit(
     project,
     ["diff", "--no-ext-diff", "--no-textconv", "--binary", "HEAD", "--", "."],
     300_000
   );
-  if (Buffer.byteLength(output, "utf8") > 200_000)
-    throw new Error("Diff excede o limite de 200 KB.");
-  if (secretContent.test(output))
-    throw new Error("Diff bloqueado por conter conteúdo que parece credencial.");
+  if (Buffer.byteLength(output, "utf8") > 200_000) throw new NodarisError("GIT_DIFF_TOO_LARGE");
+  if (secretContent.test(output)) throw new NodarisError("GIT_DIFF_SENSITIVE_CONTENT");
   if (/^\+.*(?:password|api[_-]?key|token|secret)\s*[:=]\s*\S+/im.test(output))
-    throw new Error("Diff bloqueado por conter uma possível credencial.");
+    throw new NodarisError("GIT_POSSIBLE_CREDENTIAL");
   return output;
 }

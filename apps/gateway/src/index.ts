@@ -12,8 +12,27 @@ import { timingSafeEqual } from "node:crypto";
 import { z } from "zod/v4";
 import { loadConfig } from "../../../packages/core/src/config.js";
 import { rpcRequestSchema } from "../../../packages/core/src/contracts.js";
+import { NodarisError, safeError, safeErrorFromCode } from "../../../packages/core/src/errors.js";
 
-const config = loadConfig();
+function reportStartupFailure(error: unknown): never {
+  const safe = safeError(error);
+  console.error(
+    JSON.stringify({
+      componente: "gateway",
+      operacao: "startup",
+      motivo: safe.reason,
+      resultado: "erro"
+    })
+  );
+  process.exit(1);
+}
+
+let config: ReturnType<typeof loadConfig>;
+try {
+  config = loadConfig();
+} catch (error) {
+  reportStartupFailure(error);
+}
 const token = Buffer.from(config.token);
 const validHost = localhostHostValidation();
 const validOrigin = localhostOriginValidation();
@@ -26,15 +45,26 @@ async function callAgent(input: unknown): Promise<unknown> {
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(8_000)
   });
-  if (!response.ok)
-    throw new Error(
-      response.status === 401
-        ? "Agente recusou a autenticação."
-        : "Agente local indisponível ou requisição recusada."
-    );
+  if (!response.ok) {
+    if (response.status === 401) throw new NodarisError("AGENT_UNAUTHORIZED");
+    if (response.status === 400) {
+      try {
+        const body: unknown = await response.json();
+        if (typeof body === "object" && body !== null && "code" in body) {
+          const safe = safeErrorFromCode(body.code);
+          throw new NodarisError(safe.code);
+        }
+      } catch (error) {
+        if (error instanceof NodarisError) throw error;
+      }
+    }
+    throw new NodarisError("AGENT_UNAVAILABLE");
+  }
   const result: unknown = await response.json();
-  if (typeof result === "object" && result !== null && "error" in result)
-    throw new Error(String(result.error));
+  if (typeof result === "object" && result !== null && "error" in result) {
+    const code = "code" in result ? result.code : undefined;
+    throw new NodarisError(safeErrorFromCode(code).code);
+  }
   return result;
 }
 
@@ -64,10 +94,17 @@ function createServerForRequest(): McpServer {
           const result = await operation(args);
           return { content: [{ type: "text", text: JSON.stringify(result) }] };
         } catch (error) {
+          const safe = safeError(error);
+          console.warn(
+            JSON.stringify({
+              componente: "gateway",
+              operacao: name,
+              motivo: safe.reason,
+              resultado: "erro"
+            })
+          );
           return {
-            content: [
-              { type: "text", text: error instanceof Error ? error.message : "Falha interna." }
-            ],
+            content: [{ type: "text", text: safe.message }],
             isError: true
           };
         }
@@ -155,7 +192,37 @@ const http = createServer((req, res) => {
     return;
   }
   req.method ??= "GET";
-  void nodeHandler(req as never, res);
+  void nodeHandler(req as never, res).catch((error: unknown) => {
+    const safe = safeError(error);
+    console.warn(
+      JSON.stringify({
+        componente: "gateway",
+        operacao: "mcp.transport",
+        motivo: safe.reason,
+        resultado: "erro"
+      })
+    );
+    if (!res.headersSent)
+      res
+        .writeHead(500, {
+          "content-type": "application/json; charset=utf-8",
+          "cache-control": "no-store"
+        })
+        .end(JSON.stringify({ error: "Falha interna." }));
+  });
+});
+
+http.on("error", (error) => {
+  const safe = safeError(error);
+  console.error(
+    JSON.stringify({
+      componente: "gateway",
+      operacao: "listen",
+      motivo: safe.reason,
+      resultado: "erro"
+    })
+  );
+  process.exitCode = 1;
 });
 
 http.listen(config.gatewayPort, config.gatewayHost, () =>

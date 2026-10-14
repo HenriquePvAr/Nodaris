@@ -7,10 +7,30 @@ import { loadConfig } from "../../../packages/core/src/config.js";
 import { rpcRequestSchema } from "../../../packages/core/src/contracts.js";
 import { ProjectStore } from "../../../packages/core/src/filesystem.js";
 import { gitDiff, gitLog, gitStatus } from "../../../packages/core/src/git.js";
+import { safeError, type SafeOperation } from "../../../packages/core/src/errors.js";
 
-const config = loadConfig();
-const store = await ProjectStore.create(config.roots, config.machineId);
-await store.discover();
+function reportStartupFailure(error: unknown): never {
+  const safe = safeError(error);
+  console.error(
+    JSON.stringify({
+      componente: "agente",
+      operacao: "startup",
+      motivo: safe.reason,
+      resultado: "erro"
+    })
+  );
+  process.exit(1);
+}
+
+let config: ReturnType<typeof loadConfig>;
+let store: ProjectStore;
+try {
+  config = loadConfig();
+  store = await ProjectStore.create(config.roots, config.machineId);
+  await store.discover();
+} catch (error) {
+  reportStartupFailure(error);
+}
 const expected = Buffer.from(config.token);
 const authorized = (header: string | undefined): boolean => {
   if (!header?.startsWith("Bearer ")) return false;
@@ -33,8 +53,10 @@ const server = createServer(async (req, res) => {
     if (body.length > 32_000) req.destroy();
   });
   req.on("end", async () => {
+    let operation: SafeOperation | undefined;
     try {
       const parsed = rpcRequestSchema.parse(JSON.parse(body));
+      operation = parsed.operation;
       const result = await execute(parsed);
       res
         .writeHead(200, {
@@ -43,16 +65,36 @@ const server = createServer(async (req, res) => {
         })
         .end(JSON.stringify(result));
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Falha interna.";
-      console.warn(JSON.stringify({ evento: "rpc_recusada", mensagem: message.slice(0, 160) }));
+      const safe = safeError(error, operation);
+      console.warn(
+        JSON.stringify({
+          componente: "agente",
+          operacao: operation ?? "request.parse",
+          motivo: safe.reason,
+          resultado: "erro"
+        })
+      );
       res
         .writeHead(400, {
           "content-type": "application/json; charset=utf-8",
           "cache-control": "no-store"
         })
-        .end(JSON.stringify({ error: message }));
+        .end(JSON.stringify({ error: safe.message, code: safe.code }));
     }
   });
+});
+
+server.on("error", (error) => {
+  const safe = safeError(error);
+  console.error(
+    JSON.stringify({
+      componente: "agente",
+      operacao: "listen",
+      motivo: safe.reason,
+      resultado: "erro"
+    })
+  );
+  process.exitCode = 1;
 });
 
 async function execute(request: ReturnType<typeof rpcRequestSchema.parse>): Promise<unknown> {

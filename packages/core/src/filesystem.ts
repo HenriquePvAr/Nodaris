@@ -6,6 +6,7 @@ import { lstat, open, opendir, readdir, readFile, realpath, stat } from "node:fs
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import type { Project } from "./contracts.js";
+import { NodarisError } from "./errors.js";
 
 const searchMaxFiles = 200;
 const searchMaxDirectoryEntries = 500;
@@ -14,12 +15,9 @@ const searchMaxDurationMs = 5_000;
 const searchMaxConcurrent = 2;
 const searchReadChunkBytes = 64 * 1024;
 const maxFileBytes = 1_000_000;
-const searchLimitMessage = "Pesquisa interrompida pelo limite de recursos.";
-const searchConcurrencyMessage = "Limite de pesquisas simultâneas atingido.";
-
-class SearchBudgetExceeded extends Error {
+class SearchBudgetExceeded extends NodarisError {
   constructor() {
-    super(searchLimitMessage);
+    super("SEARCH_LIMIT");
   }
 }
 
@@ -104,14 +102,14 @@ async function rejectSymlinkComponents(
   checkpoint();
   const relative = path.relative(root, target);
   if (relative.startsWith("..") || path.isAbsolute(relative))
-    throw new Error("Acesso fora das raízes autorizadas.");
+    throw new NodarisError("ACCESS_OUTSIDE_PROJECT");
   let current = root;
   for (const segment of relative.split(path.sep).filter(Boolean)) {
     current = path.join(current, segment);
     checkpoint();
     const entry = await lstat(current);
     checkpoint();
-    if (entry.isSymbolicLink()) throw new Error("Acesso por link simbólico não é permitido.");
+    if (entry.isSymbolicLink()) throw new NodarisError("SYMLINK_BLOCKED");
   }
 }
 
@@ -131,8 +129,7 @@ export class ProjectStore {
     const roots: string[] = [];
     for (const configured of configuredRoots) {
       const canonical = await realpath(path.resolve(configured));
-      if (!(await stat(canonical)).isDirectory())
-        throw new Error("Raiz autorizada precisa ser um diretório.");
+      if (!(await stat(canonical)).isDirectory()) throw new NodarisError("ROOT_INVALID");
       if (!(await lstat(canonical)).isSymbolicLink()) roots.push(canonical);
     }
     return new ProjectStore([...new Set(roots)], machineId);
@@ -210,7 +207,7 @@ export class ProjectStore {
   }
   getProject(id: string): Project {
     const project = this.projects.get(id);
-    if (!project) throw new Error("Projeto não encontrado ou não autorizado.");
+    if (!project) throw new NodarisError("PROJECT_NOT_AUTHORIZED");
     return project;
   }
 
@@ -230,10 +227,10 @@ export class ProjectStore {
       relativePath.startsWith("\\\\") ||
       relativePath.includes("\0")
     )
-      throw new Error("Caminho inválido.");
+      throw new NodarisError("PATH_INVALID");
     const segments = relativePath.replaceAll("\\", "/").split("/");
     if (process.platform === "win32" && segments.some((part) => part.includes(":")))
-      throw new Error("Fluxos de dados alternativos NTFS não são permitidos.");
+      throw new NodarisError("ADS_BLOCKED");
     if (
       segments.some(
         (part) =>
@@ -242,33 +239,32 @@ export class ProjectStore {
           (part.toLowerCase() !== ".env.example" && secretName.test(part))
       )
     )
-      throw new Error("Caminho bloqueado pela política de segurança.");
+      throw new NodarisError("PATH_BLOCKED");
     const candidate = path.resolve(project.path, relativePath);
-    if (!inside(project.path, candidate)) throw new Error("Acesso fora do projeto autorizado.");
+    if (!inside(project.path, candidate)) throw new NodarisError("ACCESS_OUTSIDE_PROJECT");
     await rejectSymlinkComponents(project.path, candidate, checkpoint);
     checkpoint();
     const canonicalFile = await realpath(candidate);
     checkpoint();
-    if (!inside(project.path, canonicalFile)) throw new Error("Acesso fora do projeto autorizado.");
+    if (!inside(project.path, canonicalFile)) throw new NodarisError("ACCESS_OUTSIDE_PROJECT");
     return candidate;
   }
 
   async readText(projectId: string, relativePath: string): Promise<string> {
     const file = await this.resolveFile(projectId, relativePath);
     const fileStat = await stat(file);
-    if (!fileStat.isFile() || fileStat.size > 1_000_000)
-      throw new Error("Arquivo inválido ou acima do limite de 1 MB.");
+    if (!fileStat.isFile() || fileStat.size > 1_000_000) throw new NodarisError("FILE_TOO_LARGE");
     const extension = path.extname(file).toLowerCase();
     if (
       !textExtensions.has(extension) &&
       path.basename(file).toLowerCase() !== ".env.example" &&
       path.basename(file) !== "LICENSE"
     )
-      throw new Error("Tipo de arquivo não textual permitido.");
+      throw new NodarisError("FILE_TYPE_BLOCKED");
     const bytes = await readFile(file);
-    if (bytes.includes(0)) throw new Error("Arquivo binário não pode ser lido.");
+    if (bytes.includes(0)) throw new NodarisError("BINARY_BLOCKED");
     const text = bytes.toString("utf8");
-    if (secretContent.test(text)) throw new Error("Conteúdo potencialmente sensível bloqueado.");
+    if (secretContent.test(text)) throw new NodarisError("SENSITIVE_CONTENT_BLOCKED");
     return text;
   }
 
@@ -312,7 +308,8 @@ export class ProjectStore {
     maxResults: number
   ): Promise<Array<{ path: string; line: number; text: string }>> {
     const project = this.getProject(projectId);
-    if (this.activeSearches >= searchMaxConcurrent) throw new Error(searchConcurrencyMessage);
+    if (this.activeSearches >= searchMaxConcurrent)
+      throw new NodarisError("SEARCH_CONCURRENCY_LIMIT");
     this.activeSearches++;
 
     const startedAt = performance.now();
