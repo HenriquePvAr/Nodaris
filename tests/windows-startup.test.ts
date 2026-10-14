@@ -15,6 +15,10 @@ const supervisorRootsFixturePath = new URL(
   "./fixtures/windows/supervisor-roots-smoke.ps1",
   import.meta.url
 );
+const processIdentityFixturePath = new URL(
+  "./fixtures/windows/process-identity-smoke.ps1",
+  import.meta.url
+);
 
 describe("inicialização invisível do Windows", () => {
   it("usa WScript com janela oculta e sem credenciais em argumentos", async () => {
@@ -59,6 +63,73 @@ describe("inicialização invisível do Windows", () => {
     expect(restart).toContain("if (-not (Request-NodarisStop))");
     expect(restart).not.toContain("Start-Sleep");
   });
+
+  it("confirma identidade de processos e impede encerramento por PID reutilizado", async () => {
+    const lifecycle = await readFile(lifecyclePath, "utf8");
+    const manager = await readFile(managerPath, "utf8");
+    const supervisor = await readFile(supervisorPath, "utf8");
+
+    expect(lifecycle).toContain("function Get-NodarisProcessIdentity");
+    expect(lifecycle).toContain("startTimeUtcTicks");
+    expect(lifecycle).toContain("executablePathHash");
+    expect(lifecycle).toContain("commandLineHash");
+    expect(lifecycle).toContain("userSidHash");
+    expect(lifecycle).toContain("sessionId");
+    expect(lifecycle).toContain("function Get-NodarisSupervisorDisposition");
+    expect(lifecycle).toContain("function Stop-NodarisVerifiedProcess");
+    expect(lifecycle).toContain("NODARIS_CHILD_IDENTITY_UNCONFIRMED");
+    expect(manager).toContain("Get-NodarisSupervisorAssessment");
+    expect(manager).not.toMatch(/Get-Process\s+-Id\s+\(\[int\]\$state\.supervisorPid/);
+    expect(supervisor).toContain("supervisorIdentity = $script:supervisorIdentity");
+    expect(supervisor).toContain("identity = $identity");
+    expect(supervisor).toContain("identity_unconfirmed_manual_intervention");
+    expect(supervisor).toContain("Stop-NodarisVerifiedProcess");
+    expect(supervisor).toContain("if ($circuitOpen) { break }");
+    expect(supervisor).not.toContain("taskkill.exe");
+    expect(supervisor).not.toMatch(/['"]\/T['"]|['"]\/F['"]/);
+    expect(supervisor).not.toMatch(/Write-Diagnostic.*(commandLine|userSid|executablePath)/i);
+    expect(supervisor.indexOf("Get-NodarisProcessIdentity -ProcessId $PID")).toBeLessThan(
+      supervisor.indexOf("\n  Start-Stack")
+    );
+  });
+
+  it.skipIf(process.platform !== "win32")(
+    "exercita identidade, PID reutilizado, estado legado e parada com PIDs sintéticos",
+    async () => {
+      const windowsDirectory = process.env["WINDIR"] ?? "C:\\Windows";
+      const powershell = join(
+        windowsDirectory,
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe"
+      );
+      const outputDirectory = await mkdtemp(join(tmpdir(), "nodaris-process-identity-"));
+      try {
+        const output = execFileSync(
+          powershell,
+          [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            fileURLToPath(processIdentityFixturePath),
+            outputDirectory
+          ],
+          { encoding: "utf8", timeout: 30_000 }
+        );
+        expect(output).toContain("process-identity-fixtures=PASS");
+        expect(output).toContain("provider-cases=success,access-denied,missing-process");
+        expect(output).toContain("safe-stop=mismatch-blocked,match-allowed,query-failure-blocked");
+        expect(output).toContain("post-spawn=single-launch,no-retry,no-unverified-stop");
+        expect(output).toContain("metadata=sanitized");
+      } finally {
+        await rm(outputDirectory, { recursive: true, force: true });
+      }
+    },
+    40_000
+  );
 
   it("distingue health local do polling recente no plano de controle", async () => {
     const launcher = await readFile(launcherPath, "utf8");

@@ -78,6 +78,8 @@ $tsxModule = Join-Path $repoRoot 'node_modules\tsx'
 $maxRestarts = 5
 $mutex = [Threading.Mutex]::new($false, 'LocalNodaris-M01-Supervisor')
 $children = @{}
+$childIdentities = @{}
+$script:supervisorIdentity = $null
 $restartCounts = @{ agent = 0; gateway = 0; tunnel = 0 }
 $statuses = @{ agent = 'pending'; gateway = 'pending'; tunnel = 'pending' }
 $circuitOpen = $false
@@ -120,9 +122,11 @@ function Write-State([string]$SupervisorStatus) {
   foreach ($name in @('agent', 'gateway', 'tunnel')) {
     $pidValue = $null
     if ($children.ContainsKey($name) -and $null -ne $children[$name]) { $pidValue = $children[$name].Id }
-    $services[$name] = @{ status = $statuses[$name]; pid = $pidValue; restartCount = $restartCounts[$name] }
+    $identity = $null
+    if ($childIdentities.ContainsKey($name)) { $identity = $childIdentities[$name] }
+    $services[$name] = @{ status = $statuses[$name]; pid = $pidValue; restartCount = $restartCounts[$name]; identity = $identity }
   }
-  $state = @{ status = $SupervisorStatus; supervisorPid = $PID; updatedAt = [DateTime]::UtcNow.ToString('o'); services = $services }
+  $state = @{ status = $SupervisorStatus; supervisorPid = $PID; supervisorIdentity = $script:supervisorIdentity; updatedAt = [DateTime]::UtcNow.ToString('o'); services = $services }
   $temporary = "$stateFile.tmp"
   [IO.File]::WriteAllText($temporary, ($state | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
   Move-Item -LiteralPath $temporary -Destination $stateFile -Force
@@ -230,6 +234,24 @@ function Start-Child([string]$Name, [string]$Executable, [string[]]$Arguments, [
   $process = Start-Process -FilePath $Executable -ArgumentList $argumentLine -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
   $timer.Stop()
   $children[$Name] = $process
+  $statuses[$Name] = 'starting; identidade pendente'
+  Write-State 'starting'
+  try {
+    $spawnedStartTicks = [long]$process.StartTime.ToUniversalTime().Ticks
+    $identity = Get-NodarisProcessIdentity -ProcessId $process.Id -ExpectedExecutablePath $Executable -ExpectedStartTimeUtcTicks $spawnedStartTicks
+    if ($null -eq $identity -or $identity.expectedExecutableMatches -ne $true -or $identity.parentProcessId -ne $PID) {
+      throw 'NODARIS_PROCESS_IDENTITY_UNCONFIRMED'
+    }
+  } catch {
+    $statuses[$Name] = 'identity_unconfirmed_manual_intervention'
+    $script:circuitOpen = $true
+    try {
+      Write-Diagnostic $Name 'process' 'failed' 'process_start_failed' $activeAttempt $timer.ElapsedMilliseconds $activeTimeout
+      Write-State 'recovering'
+    } catch { }
+    throw 'NODARIS_CHILD_IDENTITY_UNCONFIRMED'
+  }
+  $childIdentities[$Name] = $identity
   $statuses[$Name] = 'starting'
   Write-Diagnostic $Name 'process' 'started' 'process_started' $activeAttempt $timer.ElapsedMilliseconds $activeTimeout
   Write-State 'running'
@@ -238,11 +260,10 @@ function Start-Child([string]$Name, [string]$Executable, [string[]]$Arguments, [
 function Stop-Child([string]$Name) {
   if ($children.ContainsKey($Name) -and $null -ne $children[$Name]) {
     $process = $children[$Name]
-    $trackedPid = $process.Id
     if (-not $process.HasExited) {
-      $taskkill = Join-Path $env:WINDIR 'System32\taskkill.exe'
-      $killer = Start-Process -FilePath $taskkill -ArgumentList @('/PID', [string]$trackedPid, '/T', '/F') -WindowStyle Hidden -Wait -PassThru
-      if ($killer.ExitCode -ne 0 -and -not $process.HasExited) { throw 'NODARIS_STOP_FAILED' }
+      $expectedIdentity = $childIdentities[$Name]
+      if ($null -eq $expectedIdentity) { throw 'NODARIS_PROCESS_IDENTITY_UNCONFIRMED' }
+      Stop-NodarisVerifiedProcess -Process $process -ExpectedIdentity $expectedIdentity
     }
     $port = @{ agent = 3334; gateway = 3333; tunnel = 8080 }[$Name]
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
@@ -255,6 +276,7 @@ function Stop-Child([string]$Name) {
     if (-not $process.HasExited) { throw 'NODARIS_STOP_TIMEOUT' }
     if (Test-Port $port) { throw 'NODARIS_PORT_STILL_LISTENING' }
     $children[$Name] = $null
+    $childIdentities.Remove($Name) | Out-Null
   }
   $statuses[$Name] = 'stopped'
 }
@@ -482,6 +504,10 @@ try {
   $aclTimer.Stop()
   Add-StartupCheckpoint 'directory' 'healthy' 'directory_acl_protected' ([DateTime]::UtcNow) $aclTimer.ElapsedMilliseconds
   Flush-StartupTrace | Out-Null
+  $script:supervisorIdentity = Get-NodarisProcessIdentity -ProcessId $PID -ExpectedExecutablePath (Join-Path $PSHOME 'powershell.exe') -ExpectedScriptPath $PSCommandPath
+  if ($null -eq $script:supervisorIdentity -or $script:supervisorIdentity.expectedExecutableMatches -ne $true -or $script:supervisorIdentity.expectedScriptMatches -ne $true) {
+    throw 'NODARIS_PROCESS_IDENTITY_UNCONFIRMED'
+  }
   Write-Diagnostic 'supervisor' 'lifecycle' 'started' 'mutex_acquired' 1 $mutexTimer.ElapsedMilliseconds
   $startupPhase = 'configuration'
   $configurationTimer = [Diagnostics.Stopwatch]::StartNew()
@@ -534,6 +560,7 @@ try {
           Write-Diagnostic $name 'recovery' 'failed' 'circuit_open' $restartCounts[$name]
           Write-State 'recovering'
         }
+        if ($circuitOpen) { break }
       }
     }
     Start-Sleep -Seconds 3
