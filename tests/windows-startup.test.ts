@@ -10,6 +10,7 @@ const managerPath = new URL("../scripts/windows/nodaris.ps1", import.meta.url);
 const supervisorPath = new URL("../scripts/windows/supervisor.ps1", import.meta.url);
 const diagnosticsPath = new URL("../scripts/windows/diagnostics.ps1", import.meta.url);
 const lifecyclePath = new URL("../scripts/windows/lifecycle.ps1", import.meta.url);
+const localRootsPath = new URL("../scripts/windows/local-roots.ps1", import.meta.url);
 
 describe("inicialização invisível do Windows", () => {
   it("usa WScript com janela oculta e sem credenciais em argumentos", async () => {
@@ -109,6 +110,21 @@ describe("inicialização invisível do Windows", () => {
     expect(launcher).not.toMatch(/NODARIS_TOKEN|Bearer|Authorization|api.?key/i);
   });
 
+  it("mantém o leitor de raízes isolado até a ativação aprovada", async () => {
+    const supervisor = await readFile(supervisorPath, "utf8");
+    const reader = await readFile(localRootsPath, "utf8");
+
+    expect(supervisor).toContain("$approvedRoot = 'C:\\Users\\Dell\\Downloads\\Nodaris'");
+    expect(supervisor).not.toContain("local-roots.ps1");
+    expect(supervisor).not.toContain("Read-NodarisLocalRoots");
+    expect(reader).toContain("NODARIS_ROOT_CONFIG_REJECTED");
+    expect(reader).toContain("AreAccessRulesProtected");
+    expect(reader).toContain("ReparsePoint");
+    expect(reader).toContain("candidate.Contains(';')");
+    expect(reader).toContain("Test-NodarisJsonKeysUnique");
+    expect(reader).toContain("schemaVersion = 1");
+  });
+
   it.skipIf(process.platform !== "win32")(
     "testa backoff, health fixtures, falha sanitizada, ACL e rotação no PowerShell",
     async () => {
@@ -142,5 +158,40 @@ describe("inicialização invisível do Windows", () => {
       }
     },
     70_000
+  );
+
+  it.skipIf(process.platform !== "win32")(
+    "valida configuração local de raízes com ACLs e fixtures temporárias",
+    async () => {
+      const windowsDirectory = process.env["WINDIR"] ?? "C:\\Windows";
+      const powershell = join(
+        windowsDirectory,
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe"
+      );
+      const harness = new URL("./fixtures/windows/local-roots-smoke.ps1", import.meta.url);
+      const outputDirectory = await mkdtemp(join(tmpdir(), "nodaris-roots-test-"));
+      try {
+        const output = execFileSync(
+          powershell,
+          [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            fileURLToPath(harness),
+            outputDirectory
+          ],
+          { encoding: "utf8", timeout: 30_000 }
+        );
+        expect(output).toContain("local-roots-fixtures=PASS");
+      } finally {
+        await rm(outputDirectory, { recursive: true, force: true });
+      }
+    },
+    40_000
   );
 });
