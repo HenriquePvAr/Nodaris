@@ -133,8 +133,46 @@ afterAll(async () => {
 describe("MCP local entre processos", () => {
   it("anuncia as nove tools Nodaris exclusivamente de leitura", async () => {
     const listed = await client!.listTools();
-    expect(listed.tools.map((tool) => tool.name)).toHaveLength(9);
+    expect(listed.tools.map((tool) => tool.name)).toEqual([
+      "nodaris_health",
+      "nodaris_machines_list",
+      "nodaris_projects_list",
+      "nodaris_project_tree",
+      "nodaris_code_search",
+      "nodaris_file_read",
+      "nodaris_git_status",
+      "nodaris_git_diff",
+      "nodaris_git_log"
+    ]);
     expect(listed.tools.every((tool) => tool.annotations?.readOnlyHint === true)).toBe(true);
+
+    const expectedProperties: Record<string, string[]> = {
+      nodaris_health: [],
+      nodaris_machines_list: [],
+      nodaris_projects_list: [],
+      nodaris_project_tree: ["depth", "path", "projectId"],
+      nodaris_code_search: ["maxResults", "projectId", "query"],
+      nodaris_file_read: ["path", "projectId"],
+      nodaris_git_status: ["projectId"],
+      nodaris_git_diff: ["projectId"],
+      nodaris_git_log: ["limit", "projectId"]
+    };
+    const expectedRequired: Record<string, string[]> = {
+      nodaris_health: [],
+      nodaris_machines_list: [],
+      nodaris_projects_list: [],
+      nodaris_project_tree: ["projectId"],
+      nodaris_code_search: ["projectId", "query"],
+      nodaris_file_read: ["path", "projectId"],
+      nodaris_git_status: ["projectId"],
+      nodaris_git_diff: ["projectId"],
+      nodaris_git_log: ["projectId"]
+    };
+    for (const tool of listed.tools) {
+      const properties = Object.keys(tool.inputSchema.properties ?? {}).sort();
+      expect(properties).toEqual(expectedProperties[tool.name]);
+      expect([...(tool.inputSchema.required ?? [])].sort()).toEqual(expectedRequired[tool.name]);
+    }
   });
 
   it("encaminha health, descoberta, árvore, busca e leitura do fixture", async () => {
