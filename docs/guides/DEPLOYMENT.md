@@ -69,3 +69,21 @@ Após sair e entrar novamente no Windows, o proprietário confirmou que não apa
 O tunnel-client iniciou às 15:20:46. Às 15:29:17, a telemetria mostrava `ok/polling`, zero falhas consecutivas e poll bem-sucedido às 15:29:07 (10,6s de idade), `/readyz` HTTP 200 e seis despachos concluídos sem falhas. O último despacho registrado na amostra ocorreu às 15:21:01; esse campo não demonstra quando ocorreu o primeiro despacho. O proprietário relatou uma primeira mensagem `Tunnel-client did not poll after this request was enqueued` e que o reteste funcionou; o horário exato da primeira mensagem e o primeiro polling após o startup não estão presentes nos registros locais. O proprietário confirmou no ChatGPT health, lista de projetos, leitura do README, Git status, Git log e pesquisa de código.
 
 Referências: [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels), [guia de configuração do tunnel-client v0.0.15](https://github.com/openai/tunnel-client/blob/v0.0.15/docs/configuration.md).
+
+## Preparação de um computador Windows pessoal (WIN-02A)
+
+O preflight nativo `scripts/windows/home-preflight.ps1` não modifica esta instalação e não é o
+instalador. Requer somente Windows PowerShell 5.1; não depende de Node para informar que Node está
+ausente. Execute no checkout escolhido:
+
+```powershell
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\windows\home-preflight.ps1 inspect -TargetPath (Get-Location).Path
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\windows\home-preflight.ps1 plan -TargetPath (Get-Location).Path
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\windows\home-preflight.ps1 validate -TargetPath (Get-Location).Path
+```
+
+O resultado não mostra caminhos pessoais, contas, SIDs, PIDs, argumentos ou conteúdo de segredos.
+`plan` nunca instala nem provisiona; mesmo se todos os fatos passarem, `installationAllowed=false`
+e é necessária aprovação separada. Não copiar estado, credenciais, allowlist ou perfil do Dell.
+Confira [WIN_02A_HOME_BOOTSTRAP.md](WIN_02A_HOME_BOOTSTRAP.md) para checkout, inventário,
+pré-requisitos, bloqueios e rollback planejado.

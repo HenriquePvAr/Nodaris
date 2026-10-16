@@ -62,3 +62,8 @@ de logs ou de contexto de chat.
 6. Criar ferramentas MCP em etapa separada, inicialmente leitura e sob autorização de projeto.
 
 As ferramentas M01 permanecem somente leitura e sem alteração de schema/nome.
+
+Para WIN-02, o plano prevê vault Obsidian independente no computador pessoal, mas apenas após MEM-02
+implementar e validar aprovação por operação, ACL/reparse points nativos, backup e recuperação e
+conflitos com editores externos. Nenhum vault pessoal é criado, copiado, conectado ao Nodaris ou
+preenchido nesta etapa; dados corporativos permanecem separados.

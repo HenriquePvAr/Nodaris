@@ -119,6 +119,17 @@ Latências derivadas: 28s entre o horário registrado da tarefa e início do sup
 
 Os eventos são gravados em `%LOCALAPPDATA%\Nodaris\supervisor\startup-events.jsonl`, mais três arquivos rotacionados, limitados a 256 KiB cada. ACL protegida: usuário atual e SYSTEM. O JSONL registra timestamp UTC, duração, componente, estágio, tentativa, timeout, backoff, status e motivo enumerado. Mensagens de exceção, linhas de comando, PIDs, credenciais e conteúdo de projeto são excluídos. A gravação exige ACL privada validada para o diretório e para um arquivo já existente; sem essa validação, o evento é descartado em vez de criar uma trilha insegura.
 
+## Preflight WIN-02A somente leitura
+
+`home-preflight.ps1 inspect|plan|validate -TargetPath <checkout>` é uma ferramenta separada. Ela
+consulta versões, checkout, espaço, tarefas, mutex, processos/identidade, listeners e presença de
+arquivos privados. Não instala dependências, não altera ACL/tarefas/rede, não cria mutex nem encerra
+processos. Valores privados são avaliados por presença, nunca por conteúdo. A identidade do
+proprietário de uma porta desconhecida é `INCONCLUSIVE`, não “livre”; uma ocupação identificada é
+`BLOCKED`. Health local `/readyz` não representa readiness ChatGPT. A coleta em Dell de 16/10/2026
+foi `BLOCKED` pela instalação Nodaris ativa e pendências locais, o que não informa o estado do PC
+pessoal. A execução do preflight não substitui a janela autorizada de instalação WIN-02B.
+
 O fixture Windows `tests/fixtures/windows/diagnostics-smoke.ps1` cobre tentativa falha, backoff agendado, saúde do túnel pendente/pronto/obsoleto, rejeição de motivos livres, sanitização do schema, rotação e ACL. Isso não inicia agente/gateway/túnel reais.
 
 ### Instrumentação precoce M01.12.1

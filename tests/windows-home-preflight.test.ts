@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 
 import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
+  inspectWindowsHomeChecks,
   inspectWindowsHome,
   type WindowsHomeSnapshot
 } from "../packages/core/src/windows-home-preflight.js";
@@ -24,6 +28,26 @@ const readySnapshot: WindowsHomeSnapshot = {
 };
 
 describe("preflight portátil Windows sem efeitos colaterais", () => {
+  it("avalia statuses reais sanitizados sem promover incerteza a PASS", () => {
+    expect(
+      inspectWindowsHomeChecks([
+        { name: "windows", status: "PASS", code: "WINDOWS_SUPPORTED" },
+        { name: "task", status: "INCONCLUSIVE", code: "TASK_QUERY_UNAVAILABLE" },
+        { name: "profile", status: "NOT_CHECKED", code: "PROFILE_NOT_INSPECTED" }
+      ])
+    ).toEqual({
+      status: "INCONCLUSIVE",
+      findings: ["TASK_QUERY_UNAVAILABLE", "PROFILE_NOT_INSPECTED"],
+      effectsPerformed: false
+    });
+    expect(
+      inspectWindowsHomeChecks([
+        { name: "windows", status: "PASS", code: "WINDOWS_SUPPORTED" },
+        { name: "port", status: "BLOCKED", code: "PORT_CONFLICT" }
+      ]).status
+    ).toBe("BLOCKED");
+  });
+
   it("retorna pronto quando o snapshot demonstra os pré-requisitos", () => {
     expect(inspectWindowsHome(readySnapshot)).toEqual({
       status: "ready",
@@ -73,4 +97,40 @@ describe("preflight portátil Windows sem efeitos colaterais", () => {
     expect(result.status).toBe("inconclusive");
     expect(result.findings).toContain("HOST_FACTS_INCOMPLETE");
   });
+
+  it.skipIf(process.platform !== "win32")(
+    "executa o fixture PowerShell 5.1 do coletor e planejador com facts simulados",
+    () => {
+      const powershell = join(
+        process.env["WINDIR"] ?? "C:\\Windows",
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe"
+      );
+      const fixture = fileURLToPath(
+        new URL("./fixtures/windows/home-preflight-smoke.ps1", import.meta.url)
+      );
+      const output = execFileSync(
+        powershell,
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", fixture],
+        { encoding: "utf8", timeout: 20_000, windowsHide: true }
+      );
+      expect(output).toContain("WINDOWS_HOME_PREFLIGHT_FIXTURE=PASS");
+      const encodedReport = output
+        .split(/\r?\n/)
+        .find((line) => line.startsWith("WINDOWS_HOME_PREFLIGHT_REPORT_BASE64="))
+        ?.slice("WINDOWS_HOME_PREFLIGHT_REPORT_BASE64=".length);
+      expect(encodedReport).toBeDefined();
+      const report = JSON.parse(Buffer.from(encodedReport!, "base64").toString("utf8")) as {
+        overallStatus: "PASS" | "BLOCKED" | "INCONCLUSIVE";
+        checks: {
+          name: string;
+          status: "PASS" | "BLOCKED" | "INCONCLUSIVE" | "NOT_CHECKED";
+          code: string;
+        }[];
+      };
+      expect(inspectWindowsHomeChecks(report.checks).status).toBe(report.overallStatus);
+    }
+  );
 });

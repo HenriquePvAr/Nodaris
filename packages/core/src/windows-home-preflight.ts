@@ -41,6 +41,36 @@ export interface WindowsHomePreflight {
   readonly effectsPerformed: false;
 }
 
+export type WindowsHomeCheckStatus = "PASS" | "BLOCKED" | "INCONCLUSIVE" | "NOT_CHECKED";
+
+export interface WindowsHomeCheck {
+  readonly name: string;
+  readonly status: WindowsHomeCheckStatus;
+  readonly code: string;
+}
+
+export interface WindowsHomeCheckPreflight {
+  readonly status: "PASS" | "BLOCKED" | "INCONCLUSIVE";
+  readonly findings: readonly string[];
+  readonly effectsPerformed: false;
+}
+
+/** Avalia as checagens sanitizadas emitidas pelo coletor PowerShell nativo. */
+export function inspectWindowsHomeChecks(
+  checks: readonly WindowsHomeCheck[]
+): WindowsHomeCheckPreflight {
+  const findings = [
+    ...new Set(checks.filter((check) => check.status !== "PASS").map((check) => check.code))
+  ];
+  if (checks.some((check) => check.status === "BLOCKED")) {
+    return { status: "BLOCKED", findings, effectsPerformed: false };
+  }
+  if (checks.some((check) => check.status === "INCONCLUSIVE" || check.status === "NOT_CHECKED")) {
+    return { status: "INCONCLUSIVE", findings, effectsPerformed: false };
+  }
+  return { status: "PASS", findings, effectsPerformed: false };
+}
+
 function major(version: string | null): number | null {
   if (!version) return null;
   const match = /^v?(\d+)\./.exec(version);

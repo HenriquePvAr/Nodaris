@@ -57,3 +57,13 @@ O ZIP Windows amd64 do `tunnel-client v0.0.15` teve SHA-256 conferido com `SHA25
 O cliente oficial aceita MCP via HTTP e header MCP estático em perfil; portanto existe uma rota técnica para preservar o Bearer do gateway. A conexão real foi validada pelo proprietário, com a identidade de serviço compartilhada aprovada provisoriamente para o workspace pessoal. Não desative a autenticação do gateway nem crie túnel alternativo ou endpoint público.
 
 Referências oficiais consultadas: [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels), [tunnel-client v0.0.15](https://github.com/openai/tunnel-client/tree/v0.0.15) e [releases](https://github.com/openai/tunnel-client/releases).
+
+## Próximo computador Windows
+
+O piloto pessoal deve ter endpoint MCP independente, Bearer, runtime key, perfil local, `tunnel_id`
+e configuração de raízes próprios, provisionados no próprio computador após autorização. O túnel do
+Dell permanece intacto; não copiar ou reutilizar sua identidade, credenciais ou configuração. Cada
+conexão deverá receber nome inequívoco no ChatGPT, e a seleção entre duas máquinas não é automática
+nem comprova roteamento multi-PC. Não criar túnel ou chave durante WIN-02A. Antes de marcar conexão,
+confirmar `/readyz`, polling recente e chamadas reais pelo ChatGPT para o endpoint do computador
+selecionado. Não abrir portas inbound.

@@ -29,3 +29,15 @@ Node.js em Windows não fornece aqui garantia de abertura relativa a descritor c
 ## Segredos e publicação
 
 `.env` real e credenciais não entram no Git. Use `.env.example` sem valores reais. Revise staged files e diff antes de publicar; ver [THIRD_PARTY_SECURITY.md](THIRD_PARTY_SECURITY.md).
+
+## Diagnóstico Windows WIN-02A
+
+`scripts/windows/home-preflight.ps1` é separado dos scripts de ciclo de vida. A coleta usa consultas
+de leitura e não cria arquivo, tarefa, mutex, serviço, listener ou credencial. O script não é
+executado como SYSTEM e não pede elevação. Arquivos privados/configuração são verificados somente
+por presença; conteúdo, tokens, chaves, perfis e roots nunca são lidos para exibição. Processos e
+listeners são classificados por identidade observada e códigos enumerados; falha na associação é
+`INCONCLUSIVE`, bloqueando qualquer operação futura. Diagnóstico executado no Dell encontrou sua
+instalação ativa e foi `BLOCKED`, sem alterar processos. Isso não concede acesso nem autorização no
+computador pessoal. A execução não prova que instalação sem administrador consegue gravar; essa
+capacidade permanece `NOT_CHECKED` para evitar sondagem com escrita.

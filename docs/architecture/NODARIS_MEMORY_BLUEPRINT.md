@@ -89,3 +89,8 @@ nenhuma é exposta agora.
 - **MEM-02:** adaptador de segurança/ACL real, UX local de aprovação e índice reconstruível.
 - **MEM-03:** integração de leitura e, somente após revisão própria, proposta/aplicação local. Não
   herdar autorização entre dispositivos nem sincronizar dados empresariais.
+
+O futuro piloto WIN-02 deve criar um vault Obsidian pessoal separado somente depois dos gates MEM-02
+(aprovação local confiável, ACL nativa, proteção contra reparse points, backup/recuperação e
+conflitos com editores). Memória fica isolada por projeto; nenhuma memória pessoal é associada a
+dados corporativos por conveniência ou inferência.

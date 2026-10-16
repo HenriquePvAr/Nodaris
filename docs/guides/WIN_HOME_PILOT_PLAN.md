@@ -76,3 +76,61 @@ fora da raiz, credencial reutilizada ou falha de autorização. **PARTIAL:** com
 ou evidência incompleta. Até WIN-02, `WIN_HOME_READINESS=PARTIAL` e `SECOND_PC_CONNECTED=NO`.
 
 Nenhuma configuração do Dell é alterada por este plano.
+
+## Preflight local WIN-02A
+
+`scripts/windows/home-preflight.ps1` é um diagnóstico nativo PowerShell 5.1 separado dos scripts
+operacionais M01. `inspect` coleta facts somente leitura; `plan` imprime operações futuras sem
+executá-las; `validate` resume o estado e os bloqueios. Cada verificação usa `PASS`, `BLOCKED`,
+`INCONCLUSIVE` ou `NOT_CHECKED`. Códigos e contagens são sanitizados: o script não imprime caminhos,
+nomes de usuário, SIDs, PIDs, argumentos, valores de segredos ou conteúdos de arquivos privados.
+Perfis, configuração de raízes e arquivos privados são avaliados somente pela presença. Uma
+configuração já presente é bloqueio para não reutilizá-la automaticamente.
+
+O agregador nativo PowerShell e `inspectWindowsHomeChecks` em
+`packages/core/src/windows-home-preflight.ts` usam o mesmo contrato de checks e a mesma regra:
+qualquer bloqueio gera `BLOCKED`, e estado `INCONCLUSIVE`/`NOT_CHECKED` nunca vira `PASS`. A suíte
+compara os resultados serializados do fixture PowerShell com o avaliador TypeScript. O CLI continua
+nativo para poder informar que Node está ausente sem depender de Node/tsx para iniciar.
+
+No Dell, a execução read-only de 16/10/2026 identificou Windows 10 x64, Node 24, pnpm 12 e espaço
+livre acima do limiar de 2 GiB. A preparação foi corretamente `BLOCKED`: checkout com alterações
+locais, tarefa e mutex existentes, quatro processos Nodaris identificados, portas ocupadas pela
+instalação existente, configuração de raízes e dados privados presentes. Nenhum conteúdo privado
+foi lido. Isso caracteriza o Dell e não comprova qualquer estado do PC pessoal.
+
+O preflight não testa escrita só para descobrir permissões; acesso de escrita em escopo de usuário
+fica `NOT_CHECKED` até um piloto autorizado. A prontidão de polling do plano de controle também não
+é sondada, e `/readyz` local não prova ChatGPT. Uma porta ocupada por processo identificado é
+`BLOCKED`; proprietário/identidade não confirmados ficam `INCONCLUSIVE` e também impedem prosseguir.
+Nenhuma tarefa, mutex, listener ou processo é criado para testar conflito.
+
+## Distribuição e inventário
+
+Não há artefato ZIP autossuficiente nem instalador nesta etapa. Um ZIP criado do Git seria apenas
+um pacote de código-fonte; a instalação assistida requer Windows PowerShell 5.1, checkout versionado,
+Node 22 ou 24, pnpm 12 e `pnpm install --frozen-lockfile`. Não copiamos `node_modules` do Dell, e
+nenhum teste de instalação limpa foi executado. O piloto depende de rede/registry para instalar
+dependências e de provisionamento manual separado para credenciais/túnel.
+
+Inventário previsto: arquivos rastreados do repositório (`package.json`, `pnpm-lock.yaml`,
+`pnpm-workspace.yaml`, configuração TypeScript, `apps/`, `packages/`, `scripts/`, documentação e
+avisos de licença). Excluir `.git`, `node_modules`, `.env*` real, credenciais, perfis do tunnel-client,
+estado, diagnósticos, roots config, projetos não Nodaris e qualquer vault Obsidian pessoal.
+O artefato não foi gerado, logo não há SHA-256 de pacote a reportar.
+
+## Gates de aceitação WIN-02B
+
+- [ ] Executar o preflight no PC pessoal e revisar cada `BLOCKED`, `INCONCLUSIVE` e `NOT_CHECKED`.
+- [ ] Confirmar identidade da instalação e usuário, tarefa, mutex, processos, portas e bind loopback.
+- [ ] Obter checkout limpo da `main`, Node suportado, pnpm 12 e lockfile íntegro.
+- [ ] Instalar somente após autorização separada; sem admin, tarefas ou serviço antes da revisão.
+- [ ] Provisionar identidade/token/configuração de raízes novos e uma única raiz explicitamente aprovada.
+- [ ] Provisionar perfil/túnel/runtime key independentes; demonstrar readiness sem expor segredos.
+- [ ] Validar as nove ferramentas read-only e a conexão ChatGPT inequívoca para este computador.
+- [ ] Provar rollback em janela autorizada, removendo apenas artefatos criados pelo piloto.
+- [ ] Manter `HOME_INSTALL_READY=NO` até todos os gates serem observados no PC de destino.
+
+O primeiro vault Obsidian pessoal é uma etapa futura, separada e condicionada ao MEM-02: aprovação
+local confiável, ACL nativa, proteção de reparse points, backup/recuperação e política de conflitos.
+Não vincular conteúdo pessoal a projetos corporativos automaticamente.
