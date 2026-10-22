@@ -1,53 +1,35 @@
 # Nodaris
 
-## Licença
+O Nodaris conecta clientes MCP a pastas de projeto aprovadas pelo operador. O agente local valida cada solicitação e o Gateway publica as ferramentas de consulta por MCP Streamable HTTP, ligado a `127.0.0.1` por padrão.
 
-O Nodaris é disponibilizado sob a [PolyForm Noncommercial 1.0.0](LICENSE) (`PolyForm-Noncommercial-1.0.0`). É software com código-fonte disponível sob termos que restringem usos comerciais; não é uma licença aprovada pela Open Source Initiative. Consulte [visão geral do licenciamento](docs/legal/LICENSING.md), [licenciamento comercial](docs/legal/COMMERCIAL_LICENSING.md), [política de contribuições](docs/legal/CONTRIBUTION_POLICY.md) e [avisos de terceiros](THIRD_PARTY_NOTICES.md).
+## Runtime portátil para Windows
 
-O Nodaris conecta um cliente MCP a projetos locais por meio de um gateway Streamable HTTP e um agente local. O agente aplica as raízes autorizadas, valida caminhos e limita operações; o gateway publica apenas ferramentas de consulta.
-
-## Estado da M01
-
-MVP local versionado em `main`. Em 13/10/2026, o proprietário confirmou uma conexão real pelo ChatGPT ao computador Nodaris: foram chamadas `nodaris_health`, `nodaris_projects_list`, `nodaris_project_tree`, `nodaris_file_read`, `nodaris_code_search`, `nodaris_git_status` e `nodaris_git_log`. A leitura de `README.md` e a busca retornaram conteúdo local, e foi identificado somente o projeto Nodaris. As ferramentas permanecem somente leitura.
-
-A raiz autorizada para esse ensaio é exclusivamente `C:\Users\Dell\Downloads\Nodaris`; novas instalações continuam sem raízes configuradas por padrão. O agente, gateway e `tunnel-client` estão em loopback. A inicialização automática no Windows não está configurada. Reinício do Windows e recuperação após queda de internet permanecem sem teste; veja [plano de estabilidade](docs/guides/STABILITY_TESTS.md).
-
-## Requisitos
-
-- Windows ou Linux; Node.js 22 ou 24; pnpm 12.
-- Repositório oficial: <https://github.com/HenriquePvAr/Nodaris> (`main`).
-- Uma chave local `NODARIS_TOKEN` com ao menos 32 caracteres aleatórios.
-
-## Instalação
+O clone oferece uma configuração local por usuário para leitura. Ela gera uma identidade e um token próprios, mantém a allowlist vazia até a seleção explícita de pastas, protege o token com DPAPI e conserva Agent e Gateway em loopback. O túnel Secure MCP é opcional: cada operador usa sua conta, tunnel ID e runtime API key. A conexão do túnel exige confirmação local e usa o supervisor portátil. Veja [instalação em outro PC](docs/guides/INSTALLATION_NEW_PC.md) e [conexão do ChatGPT](docs/guides/CHATGPT_MCP_CONNECTION.md).
 
 ```powershell
-pnpm install
-$env:NODARIS_TOKEN = (node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))")
-$env:NODARIS_ALLOWED_ROOTS = 'C:\caminho\aprovado'
+git clone https://github.com/HenriquePvAr/Nodaris.git
+Set-Location Nodaris
+corepack pnpm install --frozen-lockfile
+corepack pnpm typecheck
+corepack pnpm lint
+corepack pnpm test
 ```
 
-Defina `NODARIS_ALLOWED_ROOTS` somente depois de aprovar conscientemente cada caminho. Múltiplas raízes são separadas por `;`. Não configure a raiz do disco ou uma pasta que contenha projetos que não devam ser consultados. Para não autorizar nenhum projeto, deixe a variável vazia.
+Depois dos checks, siga o guia de instalação. A configuração local exige aprovação no PowerShell e não lê credenciais, IDs, Registry, vaults ou políticas de outro computador.
 
-Em terminais separados, com as mesmas variáveis de ambiente:
+## Limites
 
-```powershell
-pnpm dev:agent
-pnpm dev:gateway
-```
+- O runtime portátil oferece ferramentas de leitura de projetos e inspeção Git. Ele não concede `memory.write` nem `project.write` e não cria ou altera notas.
+- Cada pessoa cria/associa seu próprio túnel no OpenAI Platform. O Gateway não deve ser exposto diretamente à Internet.
+- Fixtures não comprovam a instalação em outro PC físico nem chamadas externas no ChatGPT. A validação externa exige o tunnel-client ativo e chamadas reais no workspace do operador.
+- O repositório usa PolyForm Noncommercial 1.0.0. É software source-available, não uma licença aprovada pela OSI, e restringe usos comerciais. Consulte [LICENSE](LICENSE), [resumo da licença](docs/legal/LICENSING.md) e [avisos de terceiros](THIRD_PARTY_NOTICES.md).
 
-O agente e o gateway escutam apenas em `127.0.0.1` por padrão. O endpoint MCP é `http://127.0.0.1:3333/mcp` e exige `Authorization: Bearer <NODARIS_TOKEN>`. O token nunca deve ser salvo no Git.
+## Documentação
 
-## Ferramentas MCP
-
-`nodaris_health`, `nodaris_machines_list`, `nodaris_projects_list`, `nodaris_project_tree`, `nodaris_code_search`, `nodaris_file_read`, `nodaris_git_status`, `nodaris_git_diff` e `nodaris_git_log`. Todas são somente leitura. Arquivos são limitados a 1 MB, árvores a 500 entradas, diffs a 200 KB e chamadas Git a 5 segundos.
-
-## Qualidade
-
-```powershell
-pnpm typecheck
-pnpm lint
-pnpm format:check
-pnpm test
-```
-
-Veja [desenvolvimento](docs/guides/DEVELOPMENT.md), [implantação local e inicialização no Windows](docs/guides/DEPLOYMENT.md), [plano de estabilidade](docs/guides/STABILITY_TESTS.md), [autenticação GitHub](docs/guides/GITHUB_AUTH.md), [conexão ChatGPT](docs/guides/CHATGPT_TUNNEL.md), [arquitetura](docs/architecture/ARCHITECTURE.md) e [segurança](docs/security/SECURITY.md).
+- [Instalação portátil](docs/guides/INSTALLATION_NEW_PC.md)
+- [Handoff para Claude Code](docs/guides/CLAUDE_INSTALLATION_HANDOFF.md)
+- [Conexão do ChatGPT](docs/guides/CHATGPT_MCP_CONNECTION.md)
+- [Configuração do Obsidian](docs/guides/OBSIDIAN_MEMORY_SETUP.md)
+- [Solução de problemas](docs/guides/TROUBLESHOOTING.md)
+- [Desenvolvimento](docs/guides/DEVELOPMENT.md)
+- [Segurança](docs/security/SECURITY.md)
