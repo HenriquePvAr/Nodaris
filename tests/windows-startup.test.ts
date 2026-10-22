@@ -260,7 +260,7 @@ describe("inicialização invisível do Windows", () => {
   });
 
   it("carrega e valida as raízes autorizadas antes de iniciar qualquer serviço", async () => {
-    const supervisor = await readFile(supervisorPath, "utf8");
+    const supervisor = (await readFile(supervisorPath, "utf8")).replace(/\r\n/g, "\n");
     const reader = await readFile(localRootsPath, "utf8");
     const rootsFixture = await readFile(supervisorRootsFixturePath, "utf8");
     const helperStart = supervisor.indexOf("function Get-NodarisAllowedRootsValue");
